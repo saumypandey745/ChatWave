@@ -111,11 +111,20 @@ app.use(errorHandler);
 
 // Start HTTP & Socket Server for local non-Vercel environment
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  server.listen(PORT, () => {
-    console.log(`=======================================================`);
-    console.log(`🚀 ChatWave Server listening on http://localhost:${PORT}`);
-    console.log(`=======================================================`);
-  });
+  connectDB()
+    .then(() => {
+      server.listen(PORT, () => {
+        console.log(`=======================================================`);
+        console.log(`🚀 ChatWave Server listening on http://localhost:${PORT}`);
+        console.log(`=======================================================`);
+      });
+    })
+    .catch((err) => {
+      console.error('Initial DB connection error:', err.message);
+      server.listen(PORT, () => {
+        console.log(`🚀 Server started on http://localhost:${PORT} (DB Connection pending)`);
+      });
+    });
 }
 
 module.exports = app;
