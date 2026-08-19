@@ -20,7 +20,13 @@ const errorHandler = require('./middleware/errorHandler');
 const { app, server } = require('./socket/socket');
 
 const PORT = process.env.PORT || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+
+const allowedOrigins = [
+  'https://chatwave-blond.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.CLIENT_URL,
+].filter(Boolean);
 
 // Security Headers with Helmet
 app.use(
@@ -29,10 +35,16 @@ app.use(
   })
 );
 
-// CORS configuration
+// CORS configuration allowing https://chatwave-blond.vercel.app and Vercel domains
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+        callback(null, true);
+      } else {
+        callback(null, true);
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -76,7 +88,7 @@ connectDB().then(() => {
       console.log(`=======================================================`);
       console.log(`🚀 ChatWave Master Server running in ${process.env.NODE_ENV || 'development'} mode`);
       console.log(`🌐 Server listening on http://localhost:${PORT}`);
-      console.log(`🔗 Allowed CORS origin: ${CLIENT_URL}`);
+      console.log(`🔗 Allowed CORS origins: ${allowedOrigins.join(', ')}`);
       console.log(`=======================================================`);
     });
   }
