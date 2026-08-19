@@ -13,7 +13,7 @@ const connectDB = async () => {
     return cachedConnection;
   }
 
-  const connStr = process.env.MONGO_URI || 'mongodb://localhost:27017/chatwave';
+  const connStr = process.env.MONGO_URI || 'mongodb+srv://saumypandey745_db_user:A7ydNH5KEFSGDVCE@cluster0.8xtz6u0.mongodb.net/chatvibe';
 
   if (!process.env.MONGO_URI && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
     const errorMsg = 'MONGO_URI environment variable is not configured in Vercel settings.';
