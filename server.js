@@ -21,7 +21,7 @@ const { app, server } = require('./socket/socket');
 
 const PORT = process.env.PORT || 5000;
 
-// Configure Trust Proxy for Reverse Proxies (Vercel / Cloudflare)
+// Configure Trust Proxy for Reverse Proxies (Vercel / Cloudflare / Ngrok)
 app.set('trust proxy', 1);
 
 // Helper function to check if request origin is permitted
@@ -36,6 +36,7 @@ const isAllowedOrigin = (origin) => {
 
   if (allowed.includes(origin)) return true;
   if (origin.endsWith('.vercel.app')) return true;
+  if (origin.includes('.ngrok-free.dev') || origin.includes('.ngrok.io')) return true;
   return false;
 };
 
