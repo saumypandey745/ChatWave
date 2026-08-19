@@ -12,7 +12,10 @@ const connectDB = async () => {
   }
 
   const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
-  const connStr = process.env.MONGO_URI || 'mongodb+srv://saumypandey745_db_user:A7ydNH5KEFSGDVCE@cluster0.8xtz6u0.mongodb.net/chatvibe';
+  let rawUri = process.env.MONGO_URI || 'mongodb+srv://saumypandey745_db_user:A7ydNH5KEFSGDVCE@cluster0.8xtz6u0.mongodb.net/chatvibe';
+
+  // Sanitize connection string (strip accidental surrounding quotes and whitespace)
+  const connStr = rawUri ? rawUri.trim().replace(/^["']|["']$/g, '').trim() : '';
 
   if (!connStr && isVercel) {
     const errorMsg = 'MONGO_URI environment variable is not configured in Vercel settings.';
