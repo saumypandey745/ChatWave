@@ -28,10 +28,11 @@ const generateRefreshToken = async (userId, rememberMe = false, res) => {
 
   // Set httpOnly cookie
   if (res) {
+    const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', // Allow cookies in cross-origin / standard local requests
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: expiresInDays * 24 * 60 * 60 * 1000,
     });
   }

@@ -72,6 +72,21 @@ app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'ChatWave Master Backend API' });
 });
 
+// Database connection middleware for Serverless (Vercel) & HTTP requests
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Database connection error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed. Make sure MONGO_URI is configured in environment variables.',
+      error: err.message,
+    });
+  }
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -84,17 +99,15 @@ app.use('/api/chat-settings', chatSettingsRoutes);
 // Centralized Error Handling Middleware
 app.use(errorHandler);
 
-// Connect DB and Start HTTP & Socket Server
-connectDB().then(() => {
-  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-    server.listen(PORT, () => {
-      console.log(`=======================================================`);
-      console.log(`🚀 ChatWave Master Server running in ${process.env.NODE_ENV || 'development'} mode`);
-      console.log(`🌐 Server listening on http://localhost:${PORT}`);
-      console.log(`🔗 Allowed CORS origins: ${allowedOrigins.join(', ')}`);
-      console.log(`=======================================================`);
-    });
-  }
-});
+// Start HTTP & Socket Server for local development
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`=======================================================`);
+    console.log(`🚀 ChatWave Master Server running in ${process.env.NODE_ENV || 'development'} mode`);
+    console.log(`🌐 Server listening on http://localhost:${PORT}`);
+    console.log(`🔗 Allowed CORS origins: ${allowedOrigins.join(', ')}`);
+    console.log(`=======================================================`);
+  });
+}
 
 module.exports = app;
