@@ -21,6 +21,9 @@ const { app, server } = require('./socket/socket');
 
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy for Vercel / Reverse Proxy (Fixes express-rate-limit X-Forwarded-For error)
+app.set('trust proxy', 1);
+
 const allowedOrigins = [
   'https://chatwave-blond.vercel.app',
   'http://localhost:5173',
