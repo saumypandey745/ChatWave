@@ -23,6 +23,10 @@ const signup = async (req, res, next) => {
 
     const { name, email, password, confirmPassword } = req.body;
 
+    // Masked safe log (NEVER log raw passwords or credentials)
+    const maskedEmail = email ? email.toLowerCase().replace(/(?<=^.{2}).+?(?=@)/, '***') : 'unknown';
+    console.log(`[AUTH] Signup request received for email: ${maskedEmail}`);
+
     if (password !== confirmPassword) {
       return res.status(400).json({
         success: false,
@@ -59,9 +63,10 @@ const signup = async (req, res, next) => {
       success: true,
       message: 'Account created successfully',
       accessToken,
-      user: newUser,
+      user: newUser.toJSON(),
     });
   } catch (error) {
+    console.error('[AUTH] Signup Error:', error.message);
     next(error);
   }
 };
@@ -81,6 +86,9 @@ const login = async (req, res, next) => {
     }
 
     const { email, password, rememberMe } = req.body;
+
+    const maskedEmail = email ? email.toLowerCase().replace(/(?<=^.{2}).+?(?=@)/, '***') : 'unknown';
+    console.log(`[AUTH] Login attempt for email: ${maskedEmail}`);
 
     // Find user (include password for comparison)
     const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
@@ -125,6 +133,7 @@ const login = async (req, res, next) => {
       user: userObj,
     });
   } catch (error) {
+    console.error('[AUTH] Login Error:', error.message);
     next(error);
   }
 };
@@ -142,21 +151,18 @@ const googleAuth = async (req, res, next) => {
       });
     }
 
-    // Verify token using google-auth-library
     const googleUser = await verifyGoogleIdToken(idToken);
     const { email, name, picture } = googleUser;
 
     let user = await User.findOne({ email: email.toLowerCase() });
 
     if (user) {
-      // Existing user: update avatar if not present
       if (!user.avatarUrl && picture) {
         user.avatarUrl = picture;
       }
       user.isOnline = true;
       await user.save();
     } else {
-      // New user: auto create
       user = await User.create({
         name: name || 'Google User',
         email: email.toLowerCase(),
@@ -166,7 +172,6 @@ const googleAuth = async (req, res, next) => {
       });
     }
 
-    // Generate tokens
     const accessToken = generateAccessToken(user._id);
     await generateRefreshToken(user._id, true, res);
 
@@ -198,7 +203,6 @@ const refreshToken = async (req, res, next) => {
       });
     }
 
-    // Verify in DB
     const storedToken = await RefreshToken.findOne({ token: refreshTokenCookie });
     if (!storedToken) {
       return res.status(401).json({
@@ -207,7 +211,6 @@ const refreshToken = async (req, res, next) => {
       });
     }
 
-    // Verify JWT signature
     let decoded;
     try {
       decoded = jwt.verify(
@@ -222,7 +225,6 @@ const refreshToken = async (req, res, next) => {
       });
     }
 
-    // Find user
     const user = await User.findById(decoded.userId);
     if (!user) {
       return res.status(401).json({
@@ -231,7 +233,6 @@ const refreshToken = async (req, res, next) => {
       });
     }
 
-    // Issue new access token
     const accessToken = generateAccessToken(user._id);
 
     res.status(200).json({
@@ -288,7 +289,6 @@ const forgotPassword = async (req, res, next) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      // Return success to avoid email enumeration
       return res.status(200).json({
         success: true,
         message: 'If an account exists with that email, a password reset link has been sent.',
@@ -302,7 +302,6 @@ const forgotPassword = async (req, res, next) => {
       });
     }
 
-    // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
 
@@ -342,7 +341,6 @@ const resetPassword = async (req, res, next) => {
       });
     }
 
-    // Validate password complexity
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({
@@ -365,7 +363,6 @@ const resetPassword = async (req, res, next) => {
       });
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
     user.resetPasswordToken = undefined;

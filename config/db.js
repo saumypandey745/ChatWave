@@ -1,28 +1,39 @@
 const mongoose = require('mongoose');
 
-const connectDB = async () => {
-  try {
-    const connStr = process.env.MONGO_URI || 'mongodb://localhost:27017/chatwave';
-    console.log(`Connecting to MongoDB at ${connStr}...`);
+let cachedConnection = null;
 
-    await mongoose.connect(connStr, {
-      serverSelectionTimeoutMS: 3000,
+const connectDB = async () => {
+  // If connection is already established and active
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+
+  // If a connection attempt is currently in-flight, await it
+  if (cachedConnection) {
+    return cachedConnection;
+  }
+
+  const connStr = process.env.MONGO_URI || 'mongodb://localhost:27017/chatwave';
+
+  if (!process.env.MONGO_URI && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
+    const errorMsg = 'MONGO_URI environment variable is not configured in Vercel settings.';
+    console.error(`❌ [DATABASE] ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  try {
+    console.log(`[DATABASE] Connecting to MongoDB...`);
+    cachedConnection = mongoose.connect(connStr, {
+      serverSelectionTimeoutMS: 5000,
     });
 
-    console.log(`MongoDB Connected: ${mongoose.connection.host}`);
+    const m = await cachedConnection;
+    console.log(`✅ [DATABASE] MongoDB Connected: ${m.connection.host}`);
+    return m.connection;
   } catch (error) {
-    console.warn(`Primary MongoDB connection failed (${error.message}). Launching MongoDB Memory Server...`);
-    try {
-      const { MongoMemoryServer } = require('mongodb-memory-server');
-      const mongoServer = await MongoMemoryServer.create();
-      const mongoUri = mongoServer.getUri();
-
-      await mongoose.connect(mongoUri);
-      console.log(`MongoDB Memory Server Connected successfully at: ${mongoUri}`);
-    } catch (memError) {
-      console.error(`MongoDB Memory Server failed to launch: ${memError.message}`);
-      process.exit(1);
-    }
+    cachedConnection = null;
+    console.error(`❌ [DATABASE] Connection failed: ${error.message}`);
+    throw error;
   }
 };
 

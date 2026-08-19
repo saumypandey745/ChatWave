@@ -21,45 +21,83 @@ const { app, server } = require('./socket/socket');
 
 const PORT = process.env.PORT || 5000;
 
-// Trust proxy for Vercel / Reverse Proxy (Fixes express-rate-limit X-Forwarded-For error)
+// Configure Trust Proxy for Reverse Proxies (Vercel / Cloudflare)
 app.set('trust proxy', 1);
 
-// Security Headers with Helmet
+// Helper function to check if request origin is permitted
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true; // Non-browser clients (curl, Postman, server-to-server)
+  const allowed = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:5000',
+    process.env.CLIENT_URL,
+  ].filter(Boolean);
+
+  if (allowed.includes(origin)) return true;
+  if (origin.endsWith('.vercel.app')) return true;
+  return false;
+};
+
+// 1. Primary Production-Safe CORS & Preflight Middleware
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, X-CSRF-Token');
+  }
+
+  // Preflight OPTIONS request handler
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  next();
+});
+
+// 2. Security Headers with Helmet
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
 
-// CORS configuration allowing localhost and Vercel domains with credentials
-app.use(
-  cors({
-    origin: true, // Reflect request origin to allow http://localhost:5173 and vercel domains
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  })
-);
-
-// Body Parsers & Cookie Parser
+// 3. Body & Cookie Parsers
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use(cookieParser());
 
-// Serve static uploads directory
+// Static Uploads Directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Healthcheck Route
+// 4. Healthcheck & Root Endpoints
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'ChatWave Master Backend API is running smoothly' });
+  res.status(200).json({ status: 'ok', message: 'ChatWave API is running' });
 });
 
-// Root Route
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'ChatWave Master Backend API' });
+  res.status(200).json({ status: 'ok', message: 'ChatWave Backend Service' });
 });
 
-// API Routes
+// 5. Database Connection Middleware for Serverless Execution
+app.use('/api', async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (dbErr) {
+    console.error('[DATABASE MIDDLEWARE ERROR]', dbErr.message);
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed. Ensure MONGO_URI is set in project Environment Variables.',
+      error: process.env.NODE_ENV === 'production' ? null : dbErr.message,
+    });
+  }
+});
+
+// 6. API Route Handlers
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
@@ -68,19 +106,16 @@ app.use('/api/statuses', statusRoutes);
 app.use('/api/calls', callRoutes);
 app.use('/api/chat-settings', chatSettingsRoutes);
 
-// Centralized Error Handling Middleware
+// 7. Centralized Error Handler Middleware
 app.use(errorHandler);
 
-// Connect DB and Start HTTP & Socket Server
-connectDB().then(() => {
-  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-    server.listen(PORT, () => {
-      console.log(`=======================================================`);
-      console.log(`🚀 ChatWave Master Server running in ${process.env.NODE_ENV || 'development'} mode`);
-      console.log(`🌐 Server listening on http://localhost:${PORT}`);
-      console.log(`=======================================================`);
-    });
-  }
-});
+// Start HTTP & Socket Server for local non-Vercel environment
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`=======================================================`);
+    console.log(`🚀 ChatWave Server listening on http://localhost:${PORT}`);
+    console.log(`=======================================================`);
+  });
+}
 
 module.exports = app;
