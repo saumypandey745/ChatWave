@@ -52,6 +52,11 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'ChatWave Master Backend API is running smoothly' });
 });
 
+// Root Route
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'ChatWave Master Backend API' });
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -66,11 +71,15 @@ app.use(errorHandler);
 
 // Connect DB and Start HTTP & Socket Server
 connectDB().then(() => {
-  server.listen(PORT, () => {
-    console.log(`=======================================================`);
-    console.log(`🚀 ChatWave Master Server running in ${process.env.NODE_ENV || 'development'} mode`);
-    console.log(`🌐 Server listening on http://localhost:${PORT}`);
-    console.log(`🔗 Allowed CORS origin: ${CLIENT_URL}`);
-    console.log(`=======================================================`);
-  });
+  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    server.listen(PORT, () => {
+      console.log(`=======================================================`);
+      console.log(`🚀 ChatWave Master Server running in ${process.env.NODE_ENV || 'development'} mode`);
+      console.log(`🌐 Server listening on http://localhost:${PORT}`);
+      console.log(`🔗 Allowed CORS origin: ${CLIENT_URL}`);
+      console.log(`=======================================================`);
+    });
+  }
 });
+
+module.exports = app;
