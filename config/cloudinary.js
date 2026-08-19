@@ -1,12 +1,27 @@
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const cloudinary = require('cloudinary').v2;
 
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Safely get upload directory (uses /tmp on Vercel/serverless environments)
+const getUploadDir = () => {
+  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production';
+  const targetDir = isServerless
+    ? path.join(os.tmpdir(), 'uploads')
+    : path.join(__dirname, '..', 'uploads');
+
+  try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+  } catch (err) {
+    console.warn('Upload directory creation skipped or failed:', err.message);
+  }
+  return targetDir;
+};
+
+const uploadDir = getUploadDir();
 
 // Configure Cloudinary if credentials are provided
 const isCloudinaryConfigured =
@@ -59,7 +74,11 @@ const handleImageUpload = async (file, req) => {
       });
       // Remove local temp file
       if (fs.existsSync(file.path)) {
-        fs.unlinkSync(file.path);
+        try {
+          fs.unlinkSync(file.path);
+        } catch (e) {
+          // ignore unlink error
+        }
       }
       return result.secure_url;
     } catch (err) {
