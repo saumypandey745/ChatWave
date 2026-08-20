@@ -2,7 +2,8 @@ const nodemailer = require('nodemailer');
 
 const createTransporter = () => {
   const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').trim();
+  // Gmail App Passwords may have spaces in them (e.g. "abcd efgh ijkl mnop") — strip them
+  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
 
   if (!user || !pass) {
     console.error('❌ [EMAIL ERROR] SMTP_USER or SMTP_PASS environment variable is not configured.');
@@ -49,7 +50,7 @@ const sendVerificationCodeEmail = async (email, code) => {
     return info;
   } catch (error) {
     console.error(`[EMAIL ERROR] Failed to send verification code to ${email}:`, error.message);
-    return null;
+    throw error; // Re-throw so the controller can handle the failure
   }
 };
 
@@ -84,7 +85,7 @@ const sendResetOtpEmail = async (email, otp) => {
     return info;
   } catch (error) {
     console.error(`[EMAIL ERROR] Failed to send password reset OTP to ${email}:`, error.message);
-    return null;
+    throw error; // Re-throw so the controller can handle the failure
   }
 };
 
