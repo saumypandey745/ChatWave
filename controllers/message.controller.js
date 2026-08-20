@@ -59,6 +59,7 @@ const getMessages = async (req, res, next) => {
       .skip(skip)
       .limit(limit)
       .populate('senderId', 'name avatarUrl')
+      .populate('reactions.userId', 'name avatarUrl')
       .populate('replyTo', 'text senderId type imageUrl')
       .populate('mentions', 'name email');
 
@@ -107,13 +108,20 @@ const sendMessage = async (req, res, next) => {
 
     const isGroupChat = isGroup === 'true' || isGroup === true;
 
-    // Check if recipient has blocked current user
+    // Check if recipient has blocked current user OR sender has blocked recipient
     if (!isGroupChat) {
       const recipientUser = await User.findById(chatId);
-      if (recipientUser && recipientUser.blockedUsers.includes(senderId)) {
+      const currentUser = await User.findById(senderId);
+      if (recipientUser && recipientUser.blockedUsers?.includes(senderId)) {
         return res.status(403).json({
           success: false,
           message: 'You cannot send messages to this user.',
+        });
+      }
+      if (currentUser && currentUser.blockedUsers?.includes(chatId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unblock user to send messages.',
         });
       }
     }
@@ -130,6 +138,14 @@ const sendMessage = async (req, res, next) => {
           size: req.file.size,
           mimeType: req.file.mimetype,
         };
+      } else if (type === 'video') {
+        fileData = {
+          url: uploadedUrl,
+          name: req.file.originalname || 'Video',
+          size: req.file.size,
+          mimeType: req.file.mimetype,
+        };
+        imageUrl = uploadedUrl;
       } else if (type === 'document') {
         fileData = {
           url: uploadedUrl,
@@ -243,17 +259,30 @@ const toggleReaction = async (req, res, next) => {
 
     await message.save();
 
+    const populated = await Message.findById(message._id).populate('reactions.userId', 'name avatarUrl');
+
     if (io) {
-      const targetRoom = message.isGroup ? `group:${message.chatId}` : message.chatId.toString();
-      io.to(targetRoom).emit('messageReaction', {
-        messageId: message._id,
-        reactions: message.reactions,
-      });
+      if (message.isGroup) {
+        io.to(`group:${message.chatId}`).emit('messageReaction', {
+          messageId: message._id,
+          reactions: populated.reactions,
+        });
+      } else {
+        const receiverSockets = getReceiverSocketId(message.chatId.toString());
+        const senderSockets = getReceiverSocketId(userId.toString());
+        const allSockets = Array.from(new Set([...receiverSockets, ...senderSockets]));
+        allSockets.forEach((sId) => {
+          io.to(sId).emit('messageReaction', {
+            messageId: message._id,
+            reactions: populated.reactions,
+          });
+        });
+      }
     }
 
     res.status(200).json({
       success: true,
-      reactions: message.reactions,
+      reactions: populated.reactions,
     });
   } catch (error) {
     next(error);
@@ -335,8 +364,10 @@ const forwardMessage = async (req, res, next) => {
         if (isGroup) {
           io.to(`group:${targetId}`).emit('newMessage', populated);
         } else {
-          const sockets = getReceiverSocketId(targetId);
-          sockets.forEach((sId) => io.to(sId).emit('newMessage', populated));
+          const recipientSockets = getReceiverSocketId(targetId);
+          const senderSockets = getReceiverSocketId(senderId.toString());
+          const allSockets = Array.from(new Set([...recipientSockets, ...senderSockets]));
+          allSockets.forEach((sId) => io.to(sId).emit('newMessage', populated));
         }
       }
     }

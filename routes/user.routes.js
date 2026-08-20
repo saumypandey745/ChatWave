@@ -7,6 +7,8 @@ const {
   updateSettings,
   searchUsers,
   getContacts,
+  blockUser,
+  unblockUser,
   toggleBlockUser,
   getBlockedUsers,
   updatePrivacySettings,
@@ -25,6 +27,8 @@ router.put('/settings', updateSettings);
 router.get('/search', searchUsers);
 router.get('/contacts', getContacts);
 
+router.post('/:targetUserId/block', blockUser);
+router.post('/:targetUserId/unblock', unblockUser);
 router.post('/block/:targetUserId', toggleBlockUser);
 router.get('/blocked', getBlockedUsers);
 router.put('/privacy', updatePrivacySettings);

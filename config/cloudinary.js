@@ -50,20 +50,22 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
+  const allowedPrefixes = ['image/', 'video/', 'audio/', 'application/', 'text/'];
+  const isAllowed = allowedPrefixes.some((prefix) => file.mimetype.startsWith(prefix));
+  if (isAllowed) {
     cb(null, true);
   } else {
-    cb(new Error('Only image files (jpeg, png, webp, gif) are allowed!'), false);
+    cb(new Error('Unsupported file format! Please upload photos, videos, audio, or standard documents.'), false);
   }
 };
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB limit
   fileFilter,
 });
 
-// Helper function to handle image upload result
+// Helper function to handle image/file upload result
 const handleImageUpload = async (file, req) => {
   if (!file) return null;
 
@@ -71,6 +73,7 @@ const handleImageUpload = async (file, req) => {
     try {
       const result = await cloudinary.uploader.upload(file.path, {
         folder: 'chatwave_uploads',
+        resource_type: 'auto',
       });
       // Remove local temp file
       if (fs.existsSync(file.path)) {

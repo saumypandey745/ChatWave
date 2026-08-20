@@ -104,11 +104,27 @@ io.on('connection', async (socket) => {
     socket.leave(`group:${groupId}`);
   });
 
+  // Helper to check block state
+  const isBlockedBetween = async (userA, userB) => {
+    if (!userA || !userB) return false;
+    try {
+      const uA = await User.findById(userA).select('blockedUsers');
+      const uB = await User.findById(userB).select('blockedUsers');
+      if (uA?.blockedUsers?.includes(userB)) return true;
+      if (uB?.blockedUsers?.includes(userA)) return true;
+    } catch (e) {
+      console.error('Error checking block status in socket:', e);
+    }
+    return false;
+  };
+
   // Typing event
-  socket.on('typing', ({ receiverId, groupId }) => {
+  socket.on('typing', async ({ receiverId, groupId }) => {
     if (groupId) {
       socket.to(`group:${groupId}`).emit('userTyping', { senderId: userId, groupId });
     } else if (receiverId) {
+      const blocked = await isBlockedBetween(userId, receiverId);
+      if (blocked) return;
       const receiverSockets = getReceiverSocketId(receiverId);
       receiverSockets.forEach((sId) => {
         io.to(sId).emit('userTyping', { senderId: userId });
@@ -117,7 +133,7 @@ io.on('connection', async (socket) => {
   });
 
   // Stop typing event
-  socket.on('stopTyping', ({ receiverId, groupId }) => {
+  socket.on('stopTyping', async ({ receiverId, groupId }) => {
     if (groupId) {
       socket.to(`group:${groupId}`).emit('userStoppedTyping', { senderId: userId, groupId });
     } else if (receiverId) {
@@ -133,7 +149,12 @@ io.on('connection', async (socket) => {
   // ==========================================
 
   // 1. Call Offer (Initiate call)
-  socket.on('call-offer', ({ toUserId, offer, callType }) => {
+  socket.on('call-offer', async ({ toUserId, offer, callType }) => {
+    const blocked = await isBlockedBetween(userId, toUserId);
+    if (blocked) {
+      return socket.emit('call-declined', { byUserId: toUserId });
+    }
+
     const receiverSockets = getReceiverSocketId(toUserId);
     const callKey = getCallKey(userId, toUserId);
 

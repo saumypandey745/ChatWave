@@ -252,6 +252,60 @@ const getContacts = async (req, res, next) => {
   }
 };
 
+// @desc    Block a user explicitly
+// @route   POST /api/users/:targetUserId/block
+// @access  Private
+const blockUser = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.params;
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    const index = user.blockedUsers.indexOf(targetUserId);
+
+    if (index === -1) {
+      user.blockedUsers.push(targetUserId);
+      await user.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User blocked successfully',
+      isBlocked: true,
+      blockedUsers: user.blockedUsers,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Unblock a user explicitly
+// @route   POST /api/users/:targetUserId/unblock
+// @access  Private
+const unblockUser = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.params;
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    const index = user.blockedUsers.indexOf(targetUserId);
+
+    if (index > -1) {
+      user.blockedUsers.splice(index, 1);
+      await user.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User unblocked successfully',
+      isBlocked: false,
+      blockedUsers: user.blockedUsers,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Block or Unblock a user
 // @route   POST /api/users/block/:targetUserId
 // @access  Private
@@ -412,6 +466,8 @@ module.exports = {
   updateSettings,
   searchUsers,
   getContacts,
+  blockUser,
+  unblockUser,
   toggleBlockUser,
   getBlockedUsers,
   updatePrivacySettings,
