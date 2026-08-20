@@ -112,13 +112,19 @@ const sendMessage = async (req, res, next) => {
     if (!isGroupChat) {
       const recipientUser = await User.findById(chatId);
       const currentUser = await User.findById(senderId);
-      if (recipientUser && recipientUser.blockedUsers?.includes(senderId)) {
+      if (
+        recipientUser &&
+        recipientUser.blockedUsers?.some((b) => b.toString() === senderId.toString())
+      ) {
         return res.status(403).json({
           success: false,
           message: 'You cannot send messages to this user.',
         });
       }
-      if (currentUser && currentUser.blockedUsers?.includes(chatId)) {
+      if (
+        currentUser &&
+        currentUser.blockedUsers?.some((b) => b.toString() === chatId.toString())
+      ) {
         return res.status(403).json({
           success: false,
           message: 'Unblock user to send messages.',
@@ -161,11 +167,23 @@ const sendMessage = async (req, res, next) => {
     // Extract OpenGraph link preview if text contains a URL
     const linkPreview = await extractLinkPreview(text);
 
-    // Check chat settings for disappearing messages duration
-    const chatSettings = await ChatSettings.findOne({ userId: senderId, chatId });
+    // Check chat settings or group model for disappearing messages duration
+    let duration = 0;
+    if (isGroupChat) {
+      const group = await Group.findById(chatId);
+      if (group && group.disappearingDuration > 0) {
+        duration = group.disappearingDuration;
+      }
+    } else {
+      const chatSettings = await ChatSettings.findOne({ userId: senderId, chatId });
+      if (chatSettings && chatSettings.disappearingDuration > 0) {
+        duration = chatSettings.disappearingDuration;
+      }
+    }
+
     let expiresAt = null;
-    if (chatSettings && chatSettings.disappearingDuration > 0) {
-      expiresAt = new Date(Date.now() + chatSettings.disappearingDuration * 1000);
+    if (duration > 0) {
+      expiresAt = new Date(Date.now() + duration * 1000);
     }
 
     // Process mentions array if provided

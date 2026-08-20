@@ -14,6 +14,7 @@ const {
   updatePrivacySettings,
   setupTwoStepPin,
   savePushSubscription,
+  reportUser,
   exportChatHistory,
 } = require('../controllers/user.controller');
 
@@ -30,6 +31,7 @@ router.get('/contacts', getContacts);
 router.post('/:targetUserId/block', blockUser);
 router.post('/:targetUserId/unblock', unblockUser);
 router.post('/block/:targetUserId', toggleBlockUser);
+router.post('/:targetUserId/report', reportUser);
 router.get('/blocked', getBlockedUsers);
 router.put('/privacy', updatePrivacySettings);
 router.post('/two-step-pin', setupTwoStepPin);

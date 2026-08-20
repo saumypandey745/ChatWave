@@ -343,6 +343,71 @@ const leaveGroup = async (req, res, next) => {
   }
 };
 
+// @desc    Delete group (ANY Admin)
+// @route   DELETE /api/groups/:groupId
+// @access  Private (Admin only)
+const deleteGroup = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const member = group.members.find((m) => m.userId.toString() === userId.toString());
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can delete this group' });
+    }
+
+    const memberUserIds = group.members.map((m) => m.userId.toString());
+
+    // Delete group & group messages
+    await Group.findByIdAndDelete(groupId);
+    await Message.deleteMany({ chatId: groupId });
+
+    if (io) {
+      io.to(`group:${groupId}`).emit('groupDeleted', { groupId });
+      memberUserIds.forEach((mId) => {
+        io.to(`user:${mId}`).emit('groupDeleted', { groupId });
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Group deleted successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Report group
+// @route   POST /api/groups/:groupId/report
+// @access  Private
+const reportGroup = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { reason } = req.body;
+    const reporterId = req.user._id;
+
+    const Report = require('../models/Report');
+    const report = await Report.create({
+      reporterId,
+      targetId: groupId,
+      targetType: 'group',
+      reason: reason || 'Reported group for inappropriate content',
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Report submitted successfully',
+      report,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createGroup,
   getGroupDetails,
@@ -351,4 +416,6 @@ module.exports = {
   removeMember,
   updateMemberRole,
   leaveGroup,
+  deleteGroup,
+  reportGroup,
 };

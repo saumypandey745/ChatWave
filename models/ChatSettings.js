@@ -29,6 +29,11 @@ const chatSettingsSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    muteOption: {
+      type: String,
+      enum: ['off', '8h', '1w', 'always'],
+      default: 'off',
+    },
     wallpaper: {
       type: String,
       default: '',

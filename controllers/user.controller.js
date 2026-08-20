@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const Group = require('../models/Group');
 const ChatSettings = require('../models/ChatSettings');
+const Report = require('../models/Report');
 const { handleImageUpload } = require('../config/cloudinary');
 
 // @desc    Get current user profile
@@ -260,13 +261,11 @@ const blockUser = async (req, res, next) => {
     const { targetUserId } = req.params;
     const userId = req.user._id;
 
-    const user = await User.findById(userId);
-    const index = user.blockedUsers.indexOf(targetUserId);
-
-    if (index === -1) {
-      user.blockedUsers.push(targetUserId);
-      await user.save();
-    }
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $addToSet: { blockedUsers: targetUserId } },
+      { new: true }
+    );
 
     res.status(200).json({
       success: true,
@@ -287,13 +286,11 @@ const unblockUser = async (req, res, next) => {
     const { targetUserId } = req.params;
     const userId = req.user._id;
 
-    const user = await User.findById(userId);
-    const index = user.blockedUsers.indexOf(targetUserId);
-
-    if (index > -1) {
-      user.blockedUsers.splice(index, 1);
-      await user.save();
-    }
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $pull: { blockedUsers: targetUserId } },
+      { new: true }
+    );
 
     res.status(200).json({
       success: true,
@@ -314,23 +311,21 @@ const toggleBlockUser = async (req, res, next) => {
     const { targetUserId } = req.params;
     const userId = req.user._id;
 
-    const user = await User.findById(userId);
-    const index = user.blockedUsers.indexOf(targetUserId);
+    const currentUser = await User.findById(userId);
+    const isCurrentlyBlocked = currentUser.blockedUsers.some(
+      (id) => id.toString() === targetUserId.toString()
+    );
 
-    let isBlocked = false;
-    if (index > -1) {
-      user.blockedUsers.splice(index, 1);
-    } else {
-      user.blockedUsers.push(targetUserId);
-      isBlocked = true;
-    }
+    const updateQuery = isCurrentlyBlocked
+      ? { $pull: { blockedUsers: targetUserId } }
+      : { $addToSet: { blockedUsers: targetUserId } };
 
-    await user.save();
+    const user = await User.findByIdAndUpdate(userId, updateQuery, { new: true });
 
     res.status(200).json({
       success: true,
-      message: isBlocked ? 'User blocked' : 'User unblocked',
-      isBlocked,
+      message: !isCurrentlyBlocked ? 'User blocked' : 'User unblocked',
+      isBlocked: !isCurrentlyBlocked,
       blockedUsers: user.blockedUsers,
     });
   } catch (error) {
@@ -433,6 +428,33 @@ const savePushSubscription = async (req, res, next) => {
 };
 
 // @desc    Export chat history as JSON backup
+// @desc    Report a contact/user
+// @route   POST /api/users/:targetUserId/report
+// @access  Private
+const reportUser = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.params;
+    const { reason } = req.body;
+    const reporterId = req.user._id;
+
+    const report = await Report.create({
+      reporterId,
+      targetId: targetUserId,
+      targetType: 'user',
+      reason: reason || 'Reported user for inappropriate content or spam',
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Report submitted successfully',
+      report,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Export chat history as JSON backup
 // @route   GET /api/users/export-chat/:chatId
 // @access  Private
 const exportChatHistory = async (req, res, next) => {
@@ -451,10 +473,23 @@ const exportChatHistory = async (req, res, next) => {
       .sort({ createdAt: 1 })
       .populate('senderId', 'name email');
 
+    const formattedExport = messages.map((m) => ({
+      messageId: m._id,
+      sender: m.senderId?.name || 'Unknown',
+      senderEmail: m.senderId?.email || '',
+      type: m.type,
+      text: m.text,
+      imageUrl: m.imageUrl || undefined,
+      fileData: m.fileData || undefined,
+      locationData: m.locationData || undefined,
+      contactData: m.contactData || undefined,
+      timestamp: m.createdAt,
+    }));
+
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename=ChatWave_Export_${chatId}.json`);
 
-    res.status(200).send(JSON.stringify(messages, null, 2));
+    res.status(200).send(JSON.stringify(formattedExport, null, 2));
   } catch (error) {
     next(error);
   }
@@ -473,5 +508,6 @@ module.exports = {
   updatePrivacySettings,
   setupTwoStepPin,
   savePushSubscription,
+  reportUser,
   exportChatHistory,
 };

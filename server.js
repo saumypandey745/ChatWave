@@ -18,6 +18,19 @@ const chatSettingsRoutes = require('./routes/chatSettings.routes');
 
 const errorHandler = require('./middleware/errorHandler');
 const { app, server } = require('./socket/socket');
+const Message = require('./models/Message');
+
+// Background interval to delete expired disappearing messages (runs every 30s)
+setInterval(async () => {
+  try {
+    const res = await Message.deleteMany({ expiresAt: { $lte: new Date() } });
+    if (res.deletedCount > 0) {
+      console.log(`[DISAPPEARING MESSAGES CLEANUP] Deleted ${res.deletedCount} expired messages.`);
+    }
+  } catch (err) {
+    // Ignore cleanup errors if DB not ready yet
+  }
+}, 30000);
 
 const PORT = process.env.PORT || 5000;
 

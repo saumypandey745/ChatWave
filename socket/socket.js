@@ -236,8 +236,8 @@ io.on('connection', async (socket) => {
     });
   });
 
-  // 4. Call Decline (Callee rejects call)
-  socket.on('call-decline', async ({ toUserId }) => {
+  // 4. Call Decline (Callee rejects call or is busy)
+  socket.on('call-decline', async ({ toUserId, reason }) => {
     const callKey = getCallKey(userId, toUserId);
     const activeCall = activeCalls.get(callKey);
 
@@ -255,14 +255,14 @@ io.on('connection', async (socket) => {
       callerId,
       receiverId,
       type: cType,
-      status: 'declined',
+      status: reason === 'busy' ? 'busy' : 'declined',
       duration: 0,
     });
 
     // Notify caller that call was declined
     const callerSockets = getReceiverSocketId(toUserId);
     callerSockets.forEach((sId) => {
-      io.to(sId).emit('call-declined', { byUserId: userId });
+      io.to(sId).emit('call-declined', { byUserId: userId, reason: reason || 'declined' });
     });
 
     // Emit new call log to both participants
@@ -274,6 +274,14 @@ io.on('connection', async (socket) => {
         });
       });
     }
+  });
+
+  // 4.5 Media State Change (Mute / Cam Off toggle sync)
+  socket.on('media-state-change', ({ toUserId, isMuted, isCamOff }) => {
+    const receiverSockets = getReceiverSocketId(toUserId);
+    receiverSockets.forEach((sId) => {
+      io.to(sId).emit('media-state-change', { senderId: userId, isMuted, isCamOff });
+    });
   });
 
   // 5. Call End (User hangs up active or calling session)

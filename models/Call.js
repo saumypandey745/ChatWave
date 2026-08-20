@@ -21,7 +21,7 @@ const callSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['missed', 'answered', 'declined'],
+      enum: ['missed', 'answered', 'declined', 'busy'],
       default: 'missed',
     },
     duration: {

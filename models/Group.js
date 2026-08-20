@@ -40,6 +40,10 @@ const groupSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    disappearingDuration: {
+      type: Number,
+      default: 0, // 0 = off, 86400 = 24h, 604800 = 7d, 7776000 = 90d
+    },
   },
   {
     timestamps: true,
