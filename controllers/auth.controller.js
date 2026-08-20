@@ -6,9 +6,9 @@ const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
 const { generateAccessToken, generateRefreshToken } = require('../utils/generateTokens');
 const { verifyGoogleIdToken } = require('../config/googleClient');
-const { sendPasswordResetEmail } = require('../utils/sendEmail');
+const { sendVerificationCodeEmail, sendResetOtpEmail } = require('../utils/sendEmail');
 
-// @desc    Register a new user
+// @desc    Register a new user (Requires Email Verification)
 // @route   POST /api/auth/signup
 // @access  Public
 const signup = async (req, res, next) => {
@@ -23,7 +23,6 @@ const signup = async (req, res, next) => {
 
     const { name, email, password, confirmPassword } = req.body;
 
-    // Masked safe log (NEVER log raw passwords or credentials)
     const maskedEmail = email ? email.toLowerCase().replace(/(?<=^.{2}).+?(?=@)/, '***') : 'unknown';
     console.log(`[AUTH] Signup request received for email: ${maskedEmail}`);
 
@@ -47,23 +46,30 @@ const signup = async (req, res, next) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
+    // Generate 6-digit verification code & hash it
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeHash = await bcrypt.hash(code, 10);
+    const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Create user with isEmailVerified: false
     const newUser = await User.create({
       name,
       email: email.toLowerCase(),
       password: hashedPassword,
       authProvider: 'local',
+      isEmailVerified: false,
+      emailVerificationCodeHash: codeHash,
+      emailVerificationCodeExpires: codeExpires,
     });
 
-    // Generate tokens (Auto-login)
-    const accessToken = generateAccessToken(newUser._id);
-    await generateRefreshToken(newUser._id, false, res);
+    // Send verification email via Nodemailer (SMTP)
+    await sendVerificationCodeEmail(newUser.email, code);
 
     res.status(201).json({
       success: true,
-      message: 'Account created successfully',
-      accessToken,
-      user: newUser.toJSON(),
+      requiresVerification: true,
+      email: newUser.email,
+      message: 'Account created! Please check your email for the 6-digit verification code.',
     });
   } catch (error) {
     console.error('[AUTH] Signup Error:', error.message);
@@ -71,7 +77,122 @@ const signup = async (req, res, next) => {
   }
 };
 
-// @desc    Authenticate user & get tokens
+// @desc    Verify signup email code
+// @route   POST /api/auth/verify-email
+// @access  Public
+const verifyEmail = async (req, res, next) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and verification code are required',
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() }).select(
+      '+emailVerificationCodeHash +emailVerificationCodeExpires'
+    );
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'User account not found',
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already verified. Please sign in.',
+      });
+    }
+
+    if (
+      !user.emailVerificationCodeHash ||
+      !user.emailVerificationCodeExpires ||
+      user.emailVerificationCodeExpires < Date.now()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification code has expired. Please request a new code.',
+      });
+    }
+
+    const isMatch = await bcrypt.compare(code, user.emailVerificationCodeHash);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid verification code. Please check and try again.',
+      });
+    }
+
+    // Mark verified & clear verification code fields
+    user.isEmailVerified = true;
+    user.emailVerificationCodeHash = undefined;
+    user.emailVerificationCodeExpires = undefined;
+    user.isOnline = true;
+    await user.save();
+
+    // Generate tokens & login automatically
+    const accessToken = generateAccessToken(user._id);
+    await generateRefreshToken(user._id, true, res);
+
+    res.status(200).json({
+      success: true,
+      message: 'Email verified successfully',
+      accessToken,
+      user: user.toJSON(),
+    });
+  } catch (error) {
+    console.error('[AUTH] Verify Email Error:', error.message);
+    next(error);
+  }
+};
+
+// @desc    Resend email verification code (Rate-limited to 3 requests per 15 mins)
+// @route   POST /api/auth/resend-verification
+// @access  Public
+const resendVerification = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Account not found' });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already verified. Please sign in.',
+      });
+    }
+
+    // Generate new code, hash it, set 10 min expiry
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeHash = await bcrypt.hash(code, 10);
+
+    user.emailVerificationCodeHash = codeHash;
+    user.emailVerificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    await sendVerificationCodeEmail(user.email, code);
+
+    res.status(200).json({
+      success: true,
+      message: 'A new verification code has been sent to your email address.',
+    });
+  } catch (error) {
+    console.error('[AUTH] Resend Verification Error:', error.message);
+    next(error);
+  }
+};
+
+// @desc    Authenticate user & get tokens (Blocks unverified accounts)
 // @route   POST /api/auth/login
 // @access  Public
 const login = async (req, res, next) => {
@@ -90,7 +211,6 @@ const login = async (req, res, next) => {
     const maskedEmail = email ? email.toLowerCase().replace(/(?<=^.{2}).+?(?=@)/, '***') : 'unknown';
     console.log(`[AUTH] Login attempt for email: ${maskedEmail}`);
 
-    // Find user (include password for comparison)
     const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
     if (!user) {
       return res.status(401).json({
@@ -99,7 +219,6 @@ const login = async (req, res, next) => {
       });
     }
 
-    // If account was created via Google and has no password
     if (user.authProvider === 'google' && !user.password) {
       return res.status(400).json({
         success: false,
@@ -107,7 +226,6 @@ const login = async (req, res, next) => {
       });
     }
 
-    // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({
@@ -116,21 +234,27 @@ const login = async (req, res, next) => {
       });
     }
 
-    // Update online status
+    // Check if email is verified
+    if (!user.isEmailVerified) {
+      return res.status(403).json({
+        success: false,
+        isUnverified: true,
+        email: user.email,
+        message: 'Please verify your email address before logging in.',
+      });
+    }
+
     user.isOnline = true;
     await user.save();
 
-    // Generate tokens
     const accessToken = generateAccessToken(user._id);
     await generateRefreshToken(user._id, !!rememberMe, res);
-
-    const userObj = user.toJSON();
 
     res.status(200).json({
       success: true,
       message: 'Logged in successfully',
       accessToken,
-      user: userObj,
+      user: user.toJSON(),
     });
   } catch (error) {
     console.error('[AUTH] Login Error:', error.message);
@@ -138,7 +262,7 @@ const login = async (req, res, next) => {
   }
 };
 
-// @desc    Sign in / Sign up with Google OAuth 2.0
+// @desc    Sign in / Sign up with Google OAuth 2.0 (Google users auto-verified)
 // @route   POST /api/auth/google
 // @access  Public
 const googleAuth = async (req, res, next) => {
@@ -160,6 +284,7 @@ const googleAuth = async (req, res, next) => {
       if (!user.avatarUrl && picture) {
         user.avatarUrl = picture;
       }
+      user.isEmailVerified = true; // Auto-verify Google user
       user.isOnline = true;
       await user.save();
     } else {
@@ -168,6 +293,7 @@ const googleAuth = async (req, res, next) => {
         email: email.toLowerCase(),
         authProvider: 'google',
         avatarUrl: picture || '',
+        isEmailVerified: true, // Google users bypass email verification
         isOnline: true,
       });
     }
@@ -233,6 +359,14 @@ const refreshToken = async (req, res, next) => {
       });
     }
 
+    if (!user.isEmailVerified) {
+      return res.status(403).json({
+        success: false,
+        isUnverified: true,
+        message: 'Email address not verified',
+      });
+    }
+
     const accessToken = generateAccessToken(user._id);
 
     res.status(200).json({
@@ -278,7 +412,7 @@ const logout = async (req, res, next) => {
   }
 };
 
-// @desc    Send password reset email
+// @desc    Send 6-digit OTP for Forgot Password (Rate-limited, prevents enumeration)
 // @route   POST /api/auth/forgot-password
 // @access  Public
 const forgotPassword = async (req, res, next) => {
@@ -288,54 +422,109 @@ const forgotPassword = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Email is required' });
     }
 
+    const genericSuccessResponse = {
+      success: true,
+      message: 'If an account exists with that email, a 6-digit OTP has been sent to your inbox.',
+    };
+
     const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(200).json({
-        success: true,
-        message: 'If an account exists with that email, a password reset link has been sent.',
-      });
+    if (!user || (user.authProvider === 'google' && !user.password)) {
+      // Return generic success response to prevent user enumeration
+      return res.status(200).json(genericSuccessResponse);
     }
 
-    if (user.authProvider === 'google' && !user.password) {
-      return res.status(400).json({
-        success: false,
-        message: 'This account uses Google Sign-In. Password reset is not applicable.',
-      });
-    }
+    // Generate 6-digit OTP, hash it, set 10-minute expiry
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-
-    user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+    user.resetOtpHash = otpHash;
+    user.resetOtpExpires = otpExpires;
     await user.save();
 
-    await sendPasswordResetEmail(user.email, resetToken, req.headers.host);
+    await sendResetOtpEmail(user.email, otp);
 
-    res.status(200).json({
-      success: true,
-      message: 'If an account exists with that email, a password reset link has been sent.',
-    });
+    res.status(200).json(genericSuccessResponse);
   } catch (error) {
+    console.error('[AUTH] Forgot Password Error:', error.message);
     next(error);
   }
 };
 
-// @desc    Reset password using token
+// @desc    Verify reset OTP and return single-use reset token
+// @route   POST /api/auth/verify-reset-otp
+// @access  Public
+const verifyResetOtp = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and OTP are required',
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() }).select(
+      '+resetOtpHash +resetOtpExpires'
+    );
+
+    if (
+      !user ||
+      !user.resetOtpHash ||
+      !user.resetOtpExpires ||
+      user.resetOtpExpires < Date.now()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP. Please request a new one.',
+      });
+    }
+
+    const isMatch = await bcrypt.compare(otp, user.resetOtpHash);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP. Please check and try again.',
+      });
+    }
+
+    // Clear OTP fields & generate single-use 10-minute resetToken
+    user.resetOtpHash = undefined;
+    user.resetOtpExpires = undefined;
+
+    const rawResetToken = crypto.randomBytes(32).toString('hex');
+    const hashedResetToken = crypto.createHash('sha256').update(rawResetToken).digest('hex');
+
+    user.resetPasswordToken = hashedResetToken;
+    user.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully',
+      resetToken: rawResetToken,
+    });
+  } catch (error) {
+    console.error('[AUTH] Verify Reset OTP Error:', error.message);
+    next(error);
+  }
+};
+
+// @desc    Reset password using single-use reset token & invalidate all sessions
 // @route   POST /api/auth/reset-password
 // @access  Public
 const resetPassword = async (req, res, next) => {
   try {
-    const { token, newPassword, confirmNewPassword } = req.body;
+    const { resetToken, newPassword, confirmNewPassword } = req.body;
 
-    if (!token || !newPassword) {
+    if (!resetToken || !newPassword) {
       return res.status(400).json({
         success: false,
-        message: 'Token and new password are required',
+        message: 'Reset token and new password are required',
       });
     }
 
-    if (newPassword !== confirmNewPassword) {
+    if (confirmNewPassword !== undefined && newPassword !== confirmNewPassword) {
       return res.status(400).json({
         success: false,
         message: 'Passwords do not match',
@@ -346,11 +535,12 @@ const resetPassword = async (req, res, next) => {
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 8 characters long and contain at least 1 uppercase letter, 1 number, and 1 special character.',
+        message:
+          'Password must be at least 8 characters long and contain at least 1 uppercase letter, 1 number, and 1 special character.',
       });
     }
 
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
 
     const user = await User.findOne({
       resetPasswordToken: hashedToken,
@@ -360,7 +550,7 @@ const resetPassword = async (req, res, next) => {
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or expired password reset token',
+        message: 'Invalid or expired reset token. Please request a new password reset.',
       });
     }
 
@@ -371,21 +561,28 @@ const resetPassword = async (req, res, next) => {
 
     await user.save();
 
+    // Invalidate ALL existing refresh tokens / sessions for this user across all devices!
+    await RefreshToken.deleteMany({ userId: user._id });
+
     res.status(200).json({
       success: true,
-      message: 'Password reset successful. You can now log in with your new password.',
+      message: 'Password reset successful. All active sessions have been invalidated. Please log in with your new password.',
     });
   } catch (error) {
+    console.error('[AUTH] Reset Password Error:', error.message);
     next(error);
   }
 };
 
 module.exports = {
   signup,
+  verifyEmail,
+  resendVerification,
   login,
   googleAuth,
   refreshToken,
   logout,
   forgotPassword,
+  verifyResetOtp,
   resetPassword,
 };
