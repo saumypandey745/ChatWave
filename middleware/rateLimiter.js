@@ -1,9 +1,9 @@
 const rateLimit = require('express-rate-limit');
 
-// Rate limiter for login attempts (max 5 requests per 15 min per IP)
+// Rate limiter for login attempts (max 10 requests per 15 min per IP)
 const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -12,10 +12,10 @@ const loginRateLimiter = rateLimit({
   },
 });
 
-// Rate limiter for resend verification code (max 3 requests per 15 min per email/IP)
+// Rate limiter for resend verification code (max 10 requests per 15 min per email/IP)
 const resendVerificationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 3,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
@@ -27,10 +27,10 @@ const resendVerificationLimiter = rateLimit({
   },
 });
 
-// Rate limiter for forgot password requests (max 3 requests per 15 min per email/IP)
+// Rate limiter for forgot password requests (max 10 requests per 15 min per email/IP)
 const forgotPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 3,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
@@ -42,10 +42,10 @@ const forgotPasswordLimiter = rateLimit({
   },
 });
 
-// Rate limiter for OTP verification attempts (max 5 requests per 15 min per email/IP)
+// Rate limiter for OTP verification attempts (max 10 requests per 15 min per email/IP)
 const verifyOtpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
