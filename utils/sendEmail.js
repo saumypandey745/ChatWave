@@ -1,8 +1,12 @@
 const nodemailer = require('nodemailer');
 
 const createTransporter = () => {
-  const user = (process.env.SMTP_USER || 'saumypandey745@gmail.com').trim();
-  const pass = (process.env.SMTP_PASS || 'tloj ghzj wrak beio').trim();
+  const user = (process.env.SMTP_USER || '').trim();
+  const pass = (process.env.SMTP_PASS || '').trim();
+
+  if (!user || !pass) {
+    console.error('❌ [EMAIL ERROR] SMTP_USER or SMTP_PASS environment variable is not configured.');
+  }
 
   // Use service: 'gmail' for maximum cloud host compatibility & SSL reliability
   return nodemailer.createTransport({
@@ -18,7 +22,7 @@ const sendVerificationCodeEmail = async (email, code) => {
   try {
     const transporter = createTransporter();
     const fromAddress =
-      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'saumypandey745@gmail.com'}>`;
+      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'no-reply@chatwave.com'}>`;
 
     const mailOptions = {
       from: fromAddress,
@@ -53,7 +57,7 @@ const sendResetOtpEmail = async (email, otp) => {
   try {
     const transporter = createTransporter();
     const fromAddress =
-      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'saumypandey745@gmail.com'}>`;
+      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'no-reply@chatwave.com'}>`;
 
     const mailOptions = {
       from: fromAddress,
