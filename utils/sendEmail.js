@@ -3,8 +3,8 @@ const nodemailer = require('nodemailer');
 const createTransporter = () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').trim();
+  const user = (process.env.SMTP_USER || 'saumypandey745@gmail.com').trim();
+  const pass = (process.env.SMTP_PASS || 'tloj ghzj wrak beio').trim();
 
   return nodemailer.createTransport({
     host,
@@ -24,7 +24,7 @@ const sendVerificationCodeEmail = async (email, code) => {
   try {
     const transporter = createTransporter();
     const fromAddress =
-      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'no-reply@chatwave.com'}>`;
+      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'saumypandey745@gmail.com'}>`;
 
     const mailOptions = {
       from: fromAddress,
@@ -59,7 +59,7 @@ const sendResetOtpEmail = async (email, otp) => {
   try {
     const transporter = createTransporter();
     const fromAddress =
-      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'no-reply@chatwave.com'}>`;
+      process.env.SMTP_FROM || `"ChatWave" <${process.env.SMTP_USER || 'saumypandey745@gmail.com'}>`;
 
     const mailOptions = {
       from: fromAddress,
