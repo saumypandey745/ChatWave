@@ -11,20 +11,20 @@ app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 const allowedOrigins = [
-  'https://chatwave-blond.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000',
+  'http://localhost:5000',
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
-        callback(null, true);
-      } else {
-        callback(null, true);
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+        return callback(null, true);
       }
+      return callback(null, true); // Allow origin fallback for web clients
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,

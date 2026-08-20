@@ -75,6 +75,10 @@ app.use(cookieParser());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 4. Healthcheck & Root Endpoints
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'ChatWave API is running' });
 });
@@ -110,20 +114,20 @@ app.use('/api/chat-settings', chatSettingsRoutes);
 // 7. Centralized Error Handler Middleware
 app.use(errorHandler);
 
-// Start HTTP & Socket Server for local non-Vercel environment
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+// Start HTTP & Socket Server for standalone Web Service (Render / Local Node)
+if (!process.env.VERCEL) {
   connectDB()
     .then(() => {
       server.listen(PORT, () => {
         console.log(`=======================================================`);
-        console.log(`🚀 ChatWave Server listening on http://localhost:${PORT}`);
+        console.log(`🚀 ChatWave Server listening on port ${PORT}`);
         console.log(`=======================================================`);
       });
     })
     .catch((err) => {
       console.error('Initial DB connection error:', err.message);
       server.listen(PORT, () => {
-        console.log(`🚀 Server started on http://localhost:${PORT} (DB Connection pending)`);
+        console.log(`🚀 Server started on port ${PORT} (DB Connection pending)`);
       });
     });
 }

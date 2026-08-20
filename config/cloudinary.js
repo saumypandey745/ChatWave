@@ -6,7 +6,7 @@ const cloudinary = require('cloudinary').v2;
 
 // Safely get upload directory (uses /tmp on Vercel/serverless environments)
 const getUploadDir = () => {
-  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production';
+  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
   const targetDir = isServerless
     ? path.join(os.tmpdir(), 'uploads')
     : path.join(__dirname, '..', 'uploads');

@@ -262,10 +262,11 @@ const logout = async (req, res, next) => {
       });
     }
 
+    const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
     res.clearCookie('refreshToken', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
     });
 
     res.status(200).json({
