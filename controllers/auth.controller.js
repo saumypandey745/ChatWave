@@ -6,7 +6,6 @@ const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
 const { generateAccessToken, generateRefreshToken } = require('../utils/generateTokens');
 const { verifyGoogleIdToken } = require('../config/googleClient');
-const { sendVerificationCodeEmail, sendResetOtpEmail } = require('../utils/sendEmail');
 
 // @desc    Register a new user (Requires Email Verification)
 // @route   POST /api/auth/signup
@@ -62,14 +61,13 @@ const signup = async (req, res, next) => {
       emailVerificationCodeExpires: codeExpires,
     });
 
-    // Send verification email via Nodemailer (SMTP)
-    await sendVerificationCodeEmail(newUser.email, code);
-
     res.status(201).json({
       success: true,
       requiresVerification: true,
       email: newUser.email,
-      message: 'Account created! Please check your email for the 6-digit verification code.',
+      name: newUser.name,
+      code,
+      message: 'Account created! Verification code generated.',
     });
   } catch (error) {
     console.error('[AUTH] Signup Error:', error.message);
@@ -180,11 +178,12 @@ const resendVerification = async (req, res, next) => {
     user.emailVerificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    await sendVerificationCodeEmail(user.email, code);
-
     res.status(200).json({
       success: true,
-      message: 'A new verification code has been sent to your email address.',
+      email: user.email,
+      name: user.name,
+      code,
+      message: 'A new verification code has been generated.',
     });
   } catch (error) {
     console.error('[AUTH] Resend Verification Error:', error.message);
@@ -443,9 +442,12 @@ const forgotPassword = async (req, res, next) => {
     user.resetOtpExpires = otpExpires;
     await user.save();
 
-    await sendResetOtpEmail(user.email, otp);
-
-    res.status(200).json(genericSuccessResponse);
+    res.status(200).json({
+      ...genericSuccessResponse,
+      email: user.email,
+      name: user.name,
+      otp,
+    });
   } catch (error) {
     console.error('[AUTH] Forgot Password Error:', error.message);
     next(error);
