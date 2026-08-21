@@ -258,6 +258,7 @@ const login = async (req, res, next) => {
     });
   } catch (error) {
     console.error('[AUTH] Login Error:', error.message);
+    console.error('[AUTH] Login Error stack:', error.stack);
     next(error);
   }
 };
