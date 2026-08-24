@@ -477,6 +477,35 @@ const getBlockedUsers = async (req, res, next) => {
   }
 };
 
+// @desc    Update general user settings
+// @route   PUT /api/users/settings
+// @access  Private
+const updateSettings = async (req, res, next) => {
+  try {
+    const { hideOnlineStatus, lastSeenVisibility, profilePhotoVisibility, readReceiptsEnabled } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (typeof hideOnlineStatus === 'boolean') user.hideOnlineStatus = hideOnlineStatus;
+    if (lastSeenVisibility) user.lastSeenVisibility = lastSeenVisibility;
+    if (profilePhotoVisibility) user.profilePhotoVisibility = profilePhotoVisibility;
+    if (typeof readReceiptsEnabled === 'boolean') user.readReceiptsEnabled = readReceiptsEnabled;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Settings updated successfully',
+      user: user.toJSON(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Update privacy settings (last seen, profile photo, read receipts)
 // @route   PUT /api/users/privacy
 // @access  Private
