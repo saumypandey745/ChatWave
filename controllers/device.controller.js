@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const DeviceSession = require('../models/DeviceSession');
 const User = require('../models/User');
-const generateToken = require('../utils/generateToken');
+const { generateAccessToken } = require('../utils/generateTokens');
 
 // In-memory store for active pairing tokens: token -> { userId, expiresAt }
 const pairingTokens = new Map();
@@ -89,7 +89,7 @@ const linkDevice = async (req, res, next) => {
     });
 
     // Generate JWT auth token for newly linked session
-    const jwtToken = generateToken(res, user._id);
+    const jwtToken = generateAccessToken(user._id);
 
     res.status(200).json({
       success: true,
