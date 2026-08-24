@@ -212,12 +212,18 @@ const updateStatusPrivacy = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid status privacy mode' });
     }
 
+    // Clean and validate exception ObjectIds
+    const cleanExceptions = (Array.isArray(exceptions) ? exceptions : [])
+      .map((item) => (typeof item === 'object' && item !== null ? item._id || item.id || item : item))
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
     const user = await User.findByIdAndUpdate(
       userId,
       {
         statusPrivacy: {
           mode,
-          exceptions,
+          exceptions: cleanExceptions,
         },
       },
       { new: true }
