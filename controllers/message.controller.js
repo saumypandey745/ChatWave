@@ -218,7 +218,15 @@ const sendMessage = async (req, res, next) => {
 
     let parsedLocation = null;
     if (locationData) {
-      try { parsedLocation = typeof locationData === 'string' ? JSON.parse(locationData) : locationData; } catch (e) { parsedLocation = null; }
+      try {
+        parsedLocation = typeof locationData === 'string' ? JSON.parse(locationData) : locationData;
+        if (parsedLocation && parsedLocation.isLive) {
+          const liveDuration = Number(parsedLocation.liveDuration) || 3600;
+          parsedLocation.liveDuration = liveDuration;
+          parsedLocation.liveExpiresAt = new Date(Date.now() + liveDuration * 1000);
+          parsedLocation.isEnded = false;
+        }
+      } catch (e) { parsedLocation = null; }
     }
 
     let parsedContact = null;
@@ -849,6 +857,36 @@ const deleteChat = async (req, res, next) => {
   }
 };
 
+// @desc    Stop live location sharing early
+// @route   POST /api/messages/:id/stop-live-location
+// @access  Private
+const stopLiveLocation = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(id);
+    if (!message) return res.status(404).json({ success: false, message: 'Message not found' });
+
+    if (message.senderId.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized to stop live location' });
+    }
+
+    if (message.locationData) {
+      message.locationData.isEnded = true;
+      await message.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Live location sharing stopped',
+      messageData: message,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getMessages,
   sendMessage,
@@ -863,5 +901,6 @@ module.exports = {
   endPoll,
   clearChat,
   deleteChat,
+  stopLiveLocation,
 };
 

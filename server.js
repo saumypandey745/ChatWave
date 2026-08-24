@@ -14,6 +14,10 @@ const messageRoutes = require('./routes/message.routes');
 const groupRoutes = require('./routes/group.routes');
 const statusRoutes = require('./routes/status.routes');
 const callRoutes = require('./routes/call.routes');
+const broadcastRoutes = require('./routes/broadcast.routes');
+const deviceRoutes = require('./routes/device.routes');
+const communityRoutes = require('./routes/community.routes');
+const channelRoutes = require('./routes/channel.routes');
 const chatSettingsRoutes = require('./routes/chatSettings.routes');
 
 const errorHandler = require('./middleware/errorHandler');
@@ -26,6 +30,27 @@ setInterval(async () => {
     const res = await Message.deleteMany({ expiresAt: { $lte: new Date() } });
     if (res.deletedCount > 0) {
       console.log(`[DISAPPEARING MESSAGES CLEANUP] Deleted ${res.deletedCount} expired messages.`);
+    }
+  } catch (err) {
+    // Ignore cleanup errors if DB not ready yet
+  }
+}, 30000);
+
+// Background interval to auto-expire live location shares (runs every 30s)
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const expiredLiveLocations = await Message.find({
+      'locationData.isLive': true,
+      'locationData.isEnded': false,
+      'locationData.liveExpiresAt': { $lte: now },
+    });
+
+    for (const msg of expiredLiveLocations) {
+      msg.locationData.isEnded = true;
+      await msg.save();
+      const { io } = require('./socket/socket');
+      io.emit('live-location-stopped', { messageId: msg._id, chatId: msg.chatId });
     }
   } catch (err) {
     // Ignore cleanup errors if DB not ready yet
@@ -123,6 +148,10 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/statuses', statusRoutes);
 app.use('/api/calls', callRoutes);
+app.use('/api/broadcasts', broadcastRoutes);
+app.use('/api/devices', deviceRoutes);
+app.use('/api/communities', communityRoutes);
+app.use('/api/channels', channelRoutes);
 app.use('/api/chat-settings', chatSettingsRoutes);
 
 // 7. Centralized Error Handler Middleware

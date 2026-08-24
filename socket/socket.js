@@ -149,6 +149,50 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // Live location update event
+  socket.on('live-location-update', async ({ messageId, chatId, latitude, longitude, address }) => {
+    try {
+      const Message = require('../models/Message');
+      const updatedMsg = await Message.findByIdAndUpdate(
+        messageId,
+        {
+          'locationData.latitude': latitude,
+          'locationData.longitude': longitude,
+          'locationData.address': address || 'Live Location',
+        },
+        { new: true }
+      );
+      if (updatedMsg) {
+        io.emit('live-location-updated', {
+          messageId,
+          chatId,
+          latitude,
+          longitude,
+          address: address || 'Live Location',
+        });
+      }
+    } catch (err) {
+      console.error('Error updating live location over socket:', err);
+    }
+  });
+
+  // Live location stop event
+  socket.on('live-location-stop', async ({ messageId, chatId }) => {
+    try {
+      const Message = require('../models/Message');
+      const updatedMsg = await Message.findByIdAndUpdate(
+        messageId,
+        { 'locationData.isEnded': true },
+        { new: true }
+      );
+      if (updatedMsg) {
+        io.emit('live-location-stopped', { messageId, chatId });
+      }
+    } catch (err) {
+      console.error('Error stopping live location over socket:', err);
+    }
+  });
+
   // ==========================================
   // WebRTC Signaling Handlers & Call Persistence
   // ==========================================

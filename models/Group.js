@@ -57,6 +57,14 @@ const groupSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    communityId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Community',
+    },
+    isAnnouncementsGroup: {
+      type: Boolean,
+      default: false,
+    },
     pendingMembers: [
       {
         type: mongoose.Schema.Types.ObjectId,

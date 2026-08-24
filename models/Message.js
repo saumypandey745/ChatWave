@@ -78,6 +78,10 @@ const messageSchema = new mongoose.Schema(
       latitude: Number,
       longitude: Number,
       address: String,
+      isLive: { type: Boolean, default: false },
+      liveDuration: { type: Number, default: 0 },
+      liveExpiresAt: { type: Date, default: null },
+      isEnded: { type: Boolean, default: false },
     },
     contactData: {
       name: String,

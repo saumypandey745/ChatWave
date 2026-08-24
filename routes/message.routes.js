@@ -15,6 +15,7 @@ const {
   endPoll,
   clearChat,
   deleteChat,
+  stopLiveLocation,
 } = require('../controllers/message.controller');
 
 const router = express.Router();
@@ -36,5 +37,6 @@ router.post('/:messageId/forward', forwardMessage);
 router.post('/:messageId/view-once', handleViewOnce);
 router.post('/:messageId/poll-vote', votePoll);
 router.post('/:messageId/poll-end', endPoll);
+router.post('/:messageId/stop-live-location', stopLiveLocation);
 
 module.exports = router;
