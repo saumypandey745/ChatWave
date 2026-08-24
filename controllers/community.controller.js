@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const Community = require('../models/Community');
 const Group = require('../models/Group');
 const User = require('../models/User');
@@ -58,6 +59,7 @@ const createCommunity = async (req, res, next) => {
       createdBy: userId,
       communityId: community._id,
       isAnnouncementsGroup: true,
+      inviteCode: crypto.randomBytes(8).toString('hex'),
       members: [
         {
           userId: userId,
@@ -124,6 +126,7 @@ const addGroupToCommunity = async (req, res, next) => {
       iconUrl: community.iconUrl,
       createdBy: userId,
       communityId: community._id,
+      inviteCode: crypto.randomBytes(8).toString('hex'),
       members: groupMembers,
     });
 

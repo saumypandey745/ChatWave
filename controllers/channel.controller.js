@@ -54,13 +54,20 @@ const createChannel = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Channel name is required' });
     }
 
-    const sanitizedHandle = handle
+    let sanitizedHandle = handle
       ? handle.toLowerCase().replace(/[^a-z0-9_]/g, '')
       : name.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
+    if (!sanitizedHandle) {
+      sanitizedHandle = `channel_${Date.now()}`;
+    }
+
     const existingHandle = await Channel.findOne({ handle: sanitizedHandle });
     if (existingHandle) {
-      return res.status(400).json({ success: false, message: 'Channel handle already taken' });
+      if (handle) {
+        return res.status(400).json({ success: false, message: 'Channel handle already taken' });
+      }
+      sanitizedHandle = `${sanitizedHandle}_${Math.floor(1000 + Math.random() * 9000)}`;
     }
 
     const channel = await Channel.create({
@@ -73,10 +80,16 @@ const createChannel = async (req, res, next) => {
       subscriberCount: 1,
     });
 
+    const formattedChannel = {
+      ...channel.toObject(),
+      isSubscribed: true,
+      isOwner: true,
+    };
+
     res.status(201).json({
       success: true,
       message: 'Channel created successfully',
-      channel,
+      channel: formattedChannel,
     });
   } catch (error) {
     next(error);
