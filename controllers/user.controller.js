@@ -377,19 +377,23 @@ const blockUser = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid target user ID' });
     }
 
-    const targetObjId = new mongoose.Types.ObjectId(targetUserId);
+    const currentUser = await User.findById(userId);
+    if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { $addToSet: { blockedUsers: targetObjId } },
-      { new: true }
+    const isAlreadyBlocked = currentUser.blockedUsers.some(
+      (bId) => (bId._id || bId).toString() === targetUserId.toString()
     );
+
+    if (!isAlreadyBlocked) {
+      currentUser.blockedUsers.push(new mongoose.Types.ObjectId(targetUserId));
+      await currentUser.save();
+    }
 
     res.status(200).json({
       success: true,
       message: 'User blocked successfully',
       isBlocked: true,
-      blockedUsers: user.blockedUsers,
+      blockedUsers: currentUser.blockedUsers,
     });
   } catch (error) {
     next(error);
@@ -408,19 +412,20 @@ const unblockUser = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid target user ID' });
     }
 
-    const targetObjId = new mongoose.Types.ObjectId(targetUserId);
+    const currentUser = await User.findById(userId);
+    if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { $pull: { blockedUsers: targetObjId } },
-      { new: true }
+    currentUser.blockedUsers = currentUser.blockedUsers.filter(
+      (bId) => (bId._id || bId).toString() !== targetUserId.toString()
     );
+
+    await currentUser.save();
 
     res.status(200).json({
       success: true,
       message: 'User unblocked successfully',
       isBlocked: false,
-      blockedUsers: user.blockedUsers,
+      blockedUsers: currentUser.blockedUsers,
     });
   } catch (error) {
     next(error);
@@ -439,23 +444,28 @@ const toggleBlockUser = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid target user ID' });
     }
 
-    const targetObjId = new mongoose.Types.ObjectId(targetUserId);
     const currentUser = await User.findById(userId);
+    if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
+
     const isCurrentlyBlocked = currentUser.blockedUsers.some(
-      (id) => id.toString() === targetUserId.toString()
+      (bId) => (bId._id || bId).toString() === targetUserId.toString()
     );
 
-    const updateQuery = isCurrentlyBlocked
-      ? { $pull: { blockedUsers: targetObjId } }
-      : { $addToSet: { blockedUsers: targetObjId } };
+    if (isCurrentlyBlocked) {
+      currentUser.blockedUsers = currentUser.blockedUsers.filter(
+        (bId) => (bId._id || bId).toString() !== targetUserId.toString()
+      );
+    } else {
+      currentUser.blockedUsers.push(new mongoose.Types.ObjectId(targetUserId));
+    }
 
-    const user = await User.findByIdAndUpdate(userId, updateQuery, { new: true });
+    await currentUser.save();
 
     res.status(200).json({
       success: true,
-      message: !isCurrentlyBlocked ? 'User blocked' : 'User unblocked',
+      message: isCurrentlyBlocked ? 'User unblocked successfully' : 'User blocked successfully',
       isBlocked: !isCurrentlyBlocked,
-      blockedUsers: user.blockedUsers,
+      blockedUsers: currentUser.blockedUsers,
     });
   } catch (error) {
     next(error);
