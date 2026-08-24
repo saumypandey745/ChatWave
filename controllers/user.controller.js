@@ -638,16 +638,20 @@ const reportUser = async (req, res, next) => {
     const { reason } = req.body;
     const reporterId = req.user._id;
 
+    if (!targetUserId || !mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid target user ID' });
+    }
+
     const report = await Report.create({
       reporterId,
-      targetId: targetUserId,
+      targetId: new mongoose.Types.ObjectId(targetUserId),
       targetType: 'user',
       reason: reason || 'Reported user for inappropriate content or spam',
     });
 
     res.status(201).json({
       success: true,
-      message: 'Report submitted successfully',
+      message: 'Report submitted. Thank you for helping keep ChatWave safe.',
       report,
     });
   } catch (error) {

@@ -604,16 +604,21 @@ const reportChannel = async (req, res, next) => {
     const { reason } = req.body;
     const reporterId = req.user._id;
 
+    const mongoose = require('mongoose');
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid channel ID' });
+    }
+
     const report = await Report.create({
       reporterId,
-      targetId: id,
+      targetId: new mongoose.Types.ObjectId(id),
       targetType: 'channel',
       reason: reason || 'Reported channel for inappropriate content',
     });
 
     res.status(201).json({
       success: true,
-      message: 'Channel report submitted successfully',
+      message: 'Report submitted. Thank you for helping keep ChatWave safe.',
       report,
     });
   } catch (error) {

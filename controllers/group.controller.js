@@ -390,17 +390,22 @@ const reportGroup = async (req, res, next) => {
     const { reason } = req.body;
     const reporterId = req.user._id;
 
+    const mongoose = require('mongoose');
+    if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
+      return res.status(400).json({ success: false, message: 'Invalid group ID' });
+    }
+
     const Report = require('../models/Report');
     const report = await Report.create({
       reporterId,
-      targetId: groupId,
+      targetId: new mongoose.Types.ObjectId(groupId),
       targetType: 'group',
       reason: reason || 'Reported group for inappropriate content',
     });
 
     res.status(201).json({
       success: true,
-      message: 'Report submitted successfully',
+      message: 'Report submitted. Thank you for helping keep ChatWave safe.',
       report,
     });
   } catch (error) {

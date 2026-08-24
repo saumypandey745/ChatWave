@@ -15,7 +15,7 @@ const reportSchema = new mongoose.Schema(
     },
     targetType: {
       type: String,
-      enum: ['user', 'group'],
+      enum: ['user', 'group', 'channel'],
       required: true,
     },
     reason: {
