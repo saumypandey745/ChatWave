@@ -65,6 +65,10 @@ const groupSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isOpenToJoin: {
+      type: Boolean,
+      default: true,
+    },
     pendingMembers: [
       {
         type: mongoose.Schema.Types.ObjectId,

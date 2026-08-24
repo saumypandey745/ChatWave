@@ -19,6 +19,7 @@ const {
   getPendingMembers,
   handlePendingMemberAction,
   updateGroupPermissions,
+  getMyAdminGroups,
 } = require('../controllers/group.controller');
 
 const router = express.Router();
@@ -26,6 +27,7 @@ const router = express.Router();
 router.use(protectRoute);
 
 router.post('/', upload.single('icon'), createGroup);
+router.get('/my-admin-groups', getMyAdminGroups);
 router.post('/join/:inviteCode', joinByInviteCode);
 
 router.get('/:groupId', getGroupDetails);

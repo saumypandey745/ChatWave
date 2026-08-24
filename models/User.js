@@ -60,6 +60,12 @@ const userSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    mutedChannels: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Channel',
+      },
+    ],
     statusPrivacy: {
       mode: {
         type: String,

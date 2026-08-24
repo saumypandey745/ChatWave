@@ -27,7 +27,19 @@ const communitySchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    communityAdmins: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     members: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    pendingMembers: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -42,6 +54,31 @@ const communitySchema = new mongoose.Schema(
     announcementsGroupId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Group',
+    },
+    settings: {
+      whoCanAddGroups: {
+        type: String,
+        enum: ['admins', 'everyone'],
+        default: 'admins',
+      },
+      requiresApproval: {
+        type: Boolean,
+        default: false,
+      },
+      whoCanInvite: {
+        type: String,
+        enum: ['admins', 'everyone'],
+        default: 'everyone',
+      },
+    },
+    inviteCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    inviteRevoked: {
+      type: Boolean,
+      default: false,
     },
   },
   {

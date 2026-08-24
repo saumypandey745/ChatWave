@@ -38,6 +38,37 @@ const channelPostSchema = new mongoose.Schema(
         },
       },
     ],
+    isPinned: {
+      type: Boolean,
+      default: false,
+    },
+    editedAt: {
+      type: Date,
+    },
+    uniqueViewers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    fileName: {
+      type: String,
+      default: '',
+    },
+    fileSize: {
+      type: String,
+      default: '',
+    },
+    poll: {
+      question: { type: String, default: '' },
+      options: [
+        {
+          id: { type: String },
+          text: { type: String },
+          votes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+        },
+      ],
+    },
   },
   {
     timestamps: true,

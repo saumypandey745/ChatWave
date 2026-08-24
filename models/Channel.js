@@ -26,12 +26,22 @@ const channelSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    category: {
+      type: String,
+      default: 'General',
+    },
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
       index: true,
     },
+    admins: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     subscribers: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -41,6 +51,11 @@ const channelSchema = new mongoose.Schema(
     subscriberCount: {
       type: Number,
       default: 1,
+    },
+    pinnedPostId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChannelPost',
+      default: null,
     },
   },
   {

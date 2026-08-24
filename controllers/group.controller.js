@@ -709,6 +709,29 @@ const updateGroupPermissions = async (req, res, next) => {
   }
 };
 
+// @desc    Get all standalone groups where user is admin (for attaching to community)
+// @route   GET /api/groups/my-admin-groups
+// @access  Private
+const getMyAdminGroups = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+
+    const groups = await Group.find({
+      'members.userId': userId,
+      'members.role': 'admin',
+      $or: [{ communityId: null }, { communityId: { $exists: false } }],
+      isAnnouncementsGroup: { $ne: true },
+    }).select('name description iconUrl members');
+
+    res.status(200).json({
+      success: true,
+      groups,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createGroup,
   getGroupDetails,
@@ -727,5 +750,6 @@ module.exports = {
   getPendingMembers,
   handlePendingMemberAction,
   updateGroupPermissions,
+  getMyAdminGroups,
 };
 
