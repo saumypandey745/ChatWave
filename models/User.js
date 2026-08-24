@@ -50,6 +50,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    language: {
+      type: String,
+      default: 'en',
+    },
     blockedUsers: [
       {
         type: mongoose.Schema.Types.ObjectId,

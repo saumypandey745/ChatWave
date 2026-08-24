@@ -524,7 +524,7 @@ const getBlockedUsers = async (req, res, next) => {
 // @access  Private
 const updateSettings = async (req, res, next) => {
   try {
-    const { hideOnlineStatus, lastSeenVisibility, profilePhotoVisibility, readReceiptsEnabled } = req.body;
+    const { hideOnlineStatus, lastSeenVisibility, profilePhotoVisibility, readReceiptsEnabled, language } = req.body;
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -535,6 +535,7 @@ const updateSettings = async (req, res, next) => {
     if (lastSeenVisibility) user.lastSeenVisibility = lastSeenVisibility;
     if (profilePhotoVisibility) user.profilePhotoVisibility = profilePhotoVisibility;
     if (typeof readReceiptsEnabled === 'boolean') user.readReceiptsEnabled = readReceiptsEnabled;
+    if (language) user.language = language;
 
     await user.save();
 
