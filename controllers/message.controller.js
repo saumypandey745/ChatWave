@@ -788,6 +788,13 @@ const clearChat = async (req, res, next) => {
       );
     }
 
+    // 3. Ensure ChatSettings exists with deleted: false so chat stays active in list
+    await ChatSettings.findOneAndUpdate(
+      { userId, chatId },
+      { deleted: false },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
     res.status(200).json({
       success: true,
       message: 'Chat cleared successfully',

@@ -284,6 +284,38 @@ const getContacts = async (req, res, next) => {
       }
     }
 
+    // Include active non-deleted 1-on-1 chats from ChatSettings (e.g. cleared unsaved chats)
+    const activeSettings = await ChatSettings.find({ userId, deleted: { $ne: true } });
+    for (const setting of activeSettings) {
+      const cId = setting.chatId.toString();
+      if (!contactsMap.has(cId) && mongoose.Types.ObjectId.isValid(cId)) {
+        const isGroup = await Group.exists({ _id: cId });
+        if (!isGroup) {
+          const targetUser = await User.findById(cId).select(
+            'name email avatarUrl bio isOnline lastSeen hideOnlineStatus chatwaveId'
+          );
+          if (targetUser) {
+            const isSaved = savedContactsMap.has(cId);
+            const nickname = isSaved ? savedContactsMap.get(cId) : '';
+            const userObj = targetUser.toJSON();
+            if (nickname) {
+              userObj.nickname = nickname;
+              userObj.name = nickname;
+            }
+            userObj.isSavedContact = isSaved;
+            contactsMap.set(cId, {
+              user: userObj,
+              isGroup: false,
+              isSavedContact: isSaved,
+              nickname,
+              lastMessage: null,
+              unreadCount: 0,
+            });
+          }
+        }
+      }
+    }
+
     // Filter out chats marked as deleted in ChatSettings (unless revived by a newer message)
     const deletedSettings = await ChatSettings.find({ userId, deleted: true });
     const deletedMap = new Map();
