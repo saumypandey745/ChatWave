@@ -181,7 +181,95 @@ const updateChatSettings = async (req, res, next) => {
   }
 };
 
+// @desc    Lock or unlock a chat with a PIN
+// @route   POST /api/chat-settings/:chatId/lock
+// @access  Private
+const toggleChatLock = async (req, res, next) => {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id;
+    const { isLocked, pin } = req.body;
+
+    const bcrypt = require('bcryptjs');
+
+    let settings = await ChatSettings.findOne({ userId, chatId }).select('+lockPin');
+    if (!settings) {
+      settings = new ChatSettings({ userId, chatId });
+    }
+
+    if (isLocked) {
+      if (!pin || pin.length < 4) {
+        return res.status(400).json({
+          success: false,
+          message: 'A 4-digit numeric PIN is required to lock chat.',
+        });
+      }
+      const salt = await bcrypt.genSalt(10);
+      settings.lockPin = await bcrypt.hash(pin.toString(), salt);
+      settings.isLocked = true;
+    } else {
+      // Unlocking requires verifying current PIN if set
+      if (settings.lockPin && pin) {
+        const isMatch = await bcrypt.compare(pin.toString(), settings.lockPin);
+        if (!isMatch) {
+          return res.status(400).json({
+            success: false,
+            message: 'Incorrect PIN.',
+          });
+        }
+      }
+      settings.isLocked = false;
+      settings.lockPin = null;
+    }
+
+    await settings.save();
+
+    res.status(200).json({
+      success: true,
+      message: isLocked ? 'Chat locked successfully' : 'Chat unlocked successfully',
+      isLocked: settings.isLocked,
+      chatId,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Verify PIN to view locked chats
+// @route   POST /api/chat-settings/:chatId/verify-pin
+// @access  Private
+const verifyChatPin = async (req, res, next) => {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id;
+    const { pin } = req.body;
+
+    if (!pin) {
+      return res.status(400).json({ success: false, message: 'PIN is required.' });
+    }
+
+    const bcrypt = require('bcryptjs');
+    const settings = await ChatSettings.findOne({ userId, chatId }).select('+lockPin');
+
+    if (!settings || !settings.isLocked || !settings.lockPin) {
+      return res.status(200).json({ success: true, verified: true });
+    }
+
+    const isMatch = await bcrypt.compare(pin.toString(), settings.lockPin);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: 'Incorrect PIN.' });
+    }
+
+    res.status(200).json({ success: true, verified: true, chatId });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getAllChatSettings,
   updateChatSettings,
+  toggleChatLock,
+  verifyChatPin,
 };
+

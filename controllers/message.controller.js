@@ -54,7 +54,7 @@ const getMessages = async (req, res, next) => {
       ];
     }
 
-    const messages = await Message.find(filter)
+    const rawMessages = await Message.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -62,6 +62,16 @@ const getMessages = async (req, res, next) => {
       .populate('reactions.userId', 'name avatarUrl')
       .populate('replyTo', 'text senderId type imageUrl')
       .populate('mentions', 'name email');
+
+    // Redact media URLs for opened view-once messages
+    const messages = rawMessages.map((msg) => {
+      const msgObj = msg.toObject();
+      if (msgObj.isViewOnce && msgObj.viewOnceState === 'opened') {
+        msgObj.imageUrl = '';
+        if (msgObj.fileData) msgObj.fileData.url = '';
+      }
+      return msgObj;
+    });
 
     const totalMessages = await Message.countDocuments(filter);
 
@@ -104,12 +114,26 @@ const sendMessage = async (req, res, next) => {
       mentions,
       locationData,
       contactData,
+      isViewOnce,
     } = req.body;
 
     const isGroupChat = isGroup === 'true' || isGroup === true;
 
-    // Check if recipient has blocked current user OR sender has blocked recipient
-    if (!isGroupChat) {
+    // Check group permissions if sending to a group
+    if (isGroupChat) {
+      const group = await Group.findById(chatId);
+      if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+      if (group.permissions?.sendMessages === 'admins') {
+        const member = group.members.find((m) => m.userId.toString() === senderId.toString());
+        if (!member || member.role !== 'admin') {
+          return res.status(403).json({
+            success: false,
+            message: 'Only admins can send messages in this group.',
+          });
+        }
+      }
+    } else {
+      // Check if recipient has blocked current user OR sender has blocked recipient
       const recipientUser = await User.findById(chatId);
       const currentUser = await User.findById(senderId);
       if (
@@ -202,6 +226,26 @@ const sendMessage = async (req, res, next) => {
       try { parsedContact = typeof contactData === 'string' ? JSON.parse(contactData) : contactData; } catch (e) { parsedContact = null; }
     }
 
+    let parsedPoll = null;
+    if (type === 'poll' || req.body.pollData) {
+      try {
+        const pData = typeof req.body.pollData === 'string' ? JSON.parse(req.body.pollData) : req.body.pollData;
+        if (pData && pData.options) {
+          parsedPoll = {
+            question: pData.question || '',
+            options: pData.options.map((opt) => ({
+              text: typeof opt === 'string' ? opt : opt.text,
+              votes: [],
+            })),
+            allowMultiple: Boolean(pData.allowMultiple),
+            endedAt: null,
+          };
+        }
+      } catch (e) {
+        parsedPoll = null;
+      }
+    }
+
     const newMessage = await Message.create({
       senderId,
       receiverId: isGroupChat ? null : chatId,
@@ -213,12 +257,31 @@ const sendMessage = async (req, res, next) => {
       fileData,
       locationData: parsedLocation,
       contactData: parsedContact,
+      poll: parsedPoll,
       replyTo: replyTo || null,
       mentions: parsedMentions,
       linkPreview,
       expiresAt,
+      isViewOnce: isViewOnce === 'true' || isViewOnce === true,
       status: isGroupChat ? 'delivered' : 'sent',
     });
+
+    // Revive chat settings if previously marked deleted
+    try {
+      if (isGroupChat && group) {
+        await ChatSettings.updateMany(
+          { chatId, userId: { $in: group.members.map((m) => m.userId) } },
+          { deleted: false, deletedAt: null }
+        );
+      } else {
+        await ChatSettings.updateMany(
+          { chatId: { $in: [chatId, senderId.toString()] }, userId: { $in: [senderId, chatId] } },
+          { deleted: false, deletedAt: null }
+        );
+      }
+    } catch (e) {
+      console.error('Error resetting chat deleted state:', e);
+    }
 
     const populatedMsg = await Message.findById(newMessage._id)
       .populate('senderId', 'name avatarUrl')
@@ -468,6 +531,317 @@ const searchMessages = async (req, res, next) => {
   }
 };
 
+// @desc    Mark a view-once media message as opened & revoke file access server-side
+// @route   POST /api/messages/:messageId/view-once
+// @access  Private
+const handleViewOnce = async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) return res.status(404).json({ success: false, message: 'Message not found' });
+    if (!message.isViewOnce) return res.status(400).json({ success: false, message: 'Not a view-once message' });
+
+    if (message.viewOnceState === 'opened') {
+      return res.status(400).json({ success: false, message: 'Media already opened' });
+    }
+
+    message.viewOnceState = 'opened';
+    message.viewedBy.push({ userId, viewedAt: new Date() });
+
+    // Revoke file/image access server-side
+    message.imageUrl = '';
+    if (message.fileData) {
+      message.fileData.url = '';
+    }
+
+    await message.save();
+
+    // Broadcast socket event
+    if (io) {
+      const payload = { messageId: message._id, viewOnceState: 'opened', userId };
+      if (message.isGroup) {
+        io.to(`group:${message.chatId}`).emit('messageViewOnceOpened', payload);
+      } else {
+        const receiverSockets = getReceiverSocketId(message.chatId.toString());
+        const senderSockets = getReceiverSocketId(message.senderId.toString());
+        const allSockets = Array.from(new Set([...receiverSockets, ...senderSockets]));
+        allSockets.forEach((sId) => io.to(sId).emit('messageViewOnceOpened', payload));
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'View-once media opened',
+      viewOnceState: 'opened',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get detailed message info (delivery & read stats per recipient)
+// @route   GET /api/messages/:messageId/info
+// @access  Private
+const getMessageInfo = async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId)
+      .populate('senderId', 'name avatarUrl email')
+      .populate('reactions.userId', 'name avatarUrl');
+
+    if (!message) return res.status(404).json({ success: false, message: 'Message not found' });
+
+    if (message.senderId._id.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, message: 'Only message sender can view message info' });
+    }
+
+    let recipients = [];
+
+    if (message.isGroup) {
+      const group = await Group.findById(message.chatId).populate('members.userId', 'name avatarUrl email');
+      if (group) {
+        recipients = group.members
+          .filter((m) => m.userId && m.userId._id.toString() !== userId.toString())
+          .map((m) => {
+            return {
+              user: m.userId,
+              status: message.status === 'read' ? 'read' : 'delivered',
+              readAt: message.status === 'read' ? message.updatedAt : null,
+              deliveredAt: message.createdAt,
+            };
+          });
+      }
+    } else {
+      const receiver = await User.findById(message.receiverId || message.chatId).select('name avatarUrl email');
+      if (receiver) {
+        recipients.push({
+          user: receiver,
+          status: message.status,
+          readAt: message.status === 'read' ? message.updatedAt : null,
+          deliveredAt: message.createdAt,
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      messageInfo: {
+        message,
+        recipients,
+        sentAt: message.createdAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Vote on a poll option
+// @route   POST /api/messages/:messageId/poll-vote
+// @access  Private
+const votePoll = async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+    const { optionIndex, optionIndexes } = req.body;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message || message.type !== 'poll' || !message.poll) {
+      return res.status(404).json({ success: false, message: 'Poll message not found' });
+    }
+
+    if (message.poll.endedAt) {
+      return res.status(400).json({ success: false, message: 'This poll has ended' });
+    }
+
+    const selectedIndexes = Array.isArray(optionIndexes)
+      ? optionIndexes
+      : optionIndex !== undefined
+      ? [optionIndex]
+      : [];
+
+    if (!message.poll.allowMultiple) {
+      // Clear votes from all options first
+      message.poll.options.forEach((opt) => {
+        opt.votes = opt.votes.filter((vId) => vId.toString() !== userId.toString());
+      });
+
+      // Add vote to single selected option if valid index
+      if (selectedIndexes.length > 0) {
+        const idx = selectedIndexes[0];
+        if (message.poll.options[idx]) {
+          message.poll.options[idx].votes.push(userId);
+        }
+      }
+    } else {
+      // Toggle vote for selected indexes
+      selectedIndexes.forEach((idx) => {
+        const opt = message.poll.options[idx];
+        if (opt) {
+          const existingIdx = opt.votes.findIndex((vId) => vId.toString() === userId.toString());
+          if (existingIdx !== -1) {
+            opt.votes.splice(existingIdx, 1);
+          } else {
+            opt.votes.push(userId);
+          }
+        }
+      });
+    }
+
+    await message.save();
+
+    const updatedMessage = await Message.findById(messageId)
+      .populate('senderId', 'name avatarUrl')
+      .populate('poll.options.votes', 'name avatarUrl');
+
+    if (io) {
+      if (message.isGroup) {
+        io.to(`group:${message.chatId}`).emit('pollVoted', { messageId, poll: updatedMessage.poll });
+      } else {
+        io.to(`user:${message.senderId}`).emit('pollVoted', { messageId, poll: updatedMessage.poll });
+        io.to(`user:${message.receiverId}`).emit('pollVoted', { messageId, poll: updatedMessage.poll });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Vote recorded',
+      poll: updatedMessage.poll,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    End poll
+// @route   POST /api/messages/:messageId/poll-end
+// @access  Private
+const endPoll = async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message || message.type !== 'poll' || !message.poll) {
+      return res.status(404).json({ success: false, message: 'Poll message not found' });
+    }
+
+    if (message.senderId.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, message: 'Only poll creator can end poll' });
+    }
+
+    message.poll.endedAt = new Date();
+    await message.save();
+
+    const updatedMessage = await Message.findById(messageId)
+      .populate('senderId', 'name avatarUrl')
+      .populate('poll.options.votes', 'name avatarUrl');
+
+    if (io) {
+      if (message.isGroup) {
+        io.to(`group:${message.chatId}`).emit('pollEnded', { messageId, endedAt: message.poll.endedAt });
+      } else {
+        io.to(`user:${message.senderId}`).emit('pollEnded', { messageId, endedAt: message.poll.endedAt });
+        io.to(`user:${message.receiverId}`).emit('pollEnded', { messageId, endedAt: message.poll.endedAt });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Poll ended',
+      poll: updatedMessage.poll,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Clear chat history for current user (keeps chat in list)
+// @route   POST /api/messages/chat/:chatId/clear
+// @access  Private
+const clearChat = async (req, res, next) => {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id;
+
+    const isGroup = await Group.exists({ _id: chatId });
+
+    if (isGroup) {
+      await Message.updateMany(
+        { chatId: chatId, deletedFor: { $ne: userId } },
+        { $addToSet: { deletedFor: userId } }
+      );
+    } else {
+      await Message.updateMany(
+        {
+          $or: [
+            { senderId: userId, receiverId: chatId },
+            { senderId: chatId, receiverId: userId },
+          ],
+          deletedFor: { $ne: userId },
+        },
+        { $addToSet: { deletedFor: userId } }
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Chat cleared successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Delete chat for current user (clears history + hides chat from list)
+// @route   DELETE /api/messages/chat/:chatId
+// @access  Private
+const deleteChat = async (req, res, next) => {
+  try {
+    const { chatId } = req.params;
+    const userId = req.user._id;
+
+    const isGroup = await Group.exists({ _id: chatId });
+
+    // 1. Add userId to deletedFor on all existing messages
+    if (isGroup) {
+      await Message.updateMany(
+        { chatId: chatId, deletedFor: { $ne: userId } },
+        { $addToSet: { deletedFor: userId } }
+      );
+    } else {
+      await Message.updateMany(
+        {
+          $or: [
+            { senderId: userId, receiverId: chatId },
+            { senderId: chatId, receiverId: userId },
+          ],
+          deletedFor: { $ne: userId },
+        },
+        { $addToSet: { deletedFor: userId } }
+      );
+    }
+
+    // 2. Update ChatSettings to deleted = true
+    await ChatSettings.findOneAndUpdate(
+      { userId, chatId },
+      { deleted: true, deletedAt: new Date() },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Chat deleted successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getMessages,
   sendMessage,
@@ -476,4 +850,11 @@ module.exports = {
   forwardMessage,
   getStarredMessages,
   searchMessages,
+  handleViewOnce,
+  getMessageInfo,
+  votePoll,
+  endPoll,
+  clearChat,
+  deleteChat,
 };
+

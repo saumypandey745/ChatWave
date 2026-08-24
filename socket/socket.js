@@ -108,10 +108,13 @@ io.on('connection', async (socket) => {
   const isBlockedBetween = async (userA, userB) => {
     if (!userA || !userB) return false;
     try {
-      const uA = await User.findById(userA).select('blockedUsers');
-      const uB = await User.findById(userB).select('blockedUsers');
-      if (uA?.blockedUsers?.includes(userB)) return true;
-      if (uB?.blockedUsers?.includes(userA)) return true;
+      const strA = userA.toString();
+      const strB = userB.toString();
+      const uA = await User.findById(strA).select('blockedUsers');
+      const uB = await User.findById(strB).select('blockedUsers');
+      const uABlocked = uA?.blockedUsers?.some((id) => id.toString() === strB);
+      const uBBlocked = uB?.blockedUsers?.some((id) => id.toString() === strA);
+      return Boolean(uABlocked || uBBlocked);
     } catch (e) {
       console.error('Error checking block status in socket:', e);
     }
@@ -137,6 +140,8 @@ io.on('connection', async (socket) => {
     if (groupId) {
       socket.to(`group:${groupId}`).emit('userStoppedTyping', { senderId: userId, groupId });
     } else if (receiverId) {
+      const blocked = await isBlockedBetween(userId, receiverId);
+      if (blocked) return;
       const receiverSockets = getReceiverSocketId(receiverId);
       receiverSockets.forEach((sId) => {
         io.to(sId).emit('userStoppedTyping', { senderId: userId });
@@ -152,10 +157,17 @@ io.on('connection', async (socket) => {
   socket.on('call-offer', async ({ toUserId, offer, callType }) => {
     const blocked = await isBlockedBetween(userId, toUserId);
     if (blocked) {
-      return socket.emit('call-declined', { byUserId: toUserId });
+      socket.emit('call-declined', { byUserId: toUserId, reason: 'unavailable' });
+      return;
     }
 
     const receiverSockets = getReceiverSocketId(toUserId);
+    if (receiverSockets.length === 0) {
+      // User is offline -> emit busy / unavailable
+      socket.emit('call-declined', { byUserId: toUserId, reason: 'offline' });
+      return;
+    }
+
     const callKey = getCallKey(userId, toUserId);
 
     // Clear any previous pending call timer for this pair

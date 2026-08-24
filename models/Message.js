@@ -23,7 +23,7 @@ const messageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'call-log', 'system'],
+      enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'call-log', 'system', 'poll'],
       default: 'text',
     },
     text: {
@@ -96,6 +96,22 @@ const messageSchema = new mongoose.Schema(
       description: String,
       image: String,
     },
+    poll: {
+      question: { type: String, default: '' },
+      options: [
+        {
+          text: { type: String, required: true },
+          votes: [
+            {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: 'User',
+            },
+          ],
+        },
+      ],
+      allowMultiple: { type: Boolean, default: false },
+      endedAt: { type: Date, default: null },
+    },
     status: {
       type: String,
       enum: ['sent', 'delivered', 'read'],
@@ -119,6 +135,27 @@ const messageSchema = new mongoose.Schema(
       type: Date,
       index: { expires: 0 }, // TTL index for disappearing messages
     },
+    isViewOnce: {
+      type: Boolean,
+      default: false,
+    },
+    viewOnceState: {
+      type: String,
+      enum: ['pending', 'opened'],
+      default: 'pending',
+    },
+    viewedBy: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        viewedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true,

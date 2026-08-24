@@ -1,19 +1,27 @@
+const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const Message = require('../models/Message');
 const Group = require('../models/Group');
+const Contact = require('../models/Contact');
 const ChatSettings = require('../models/ChatSettings');
 const Report = require('../models/Report');
 const { handleImageUpload } = require('../config/cloudinary');
+const generateChatwaveId = require('../utils/generateChatwaveId');
 
 // @desc    Get current user profile
 // @route   GET /api/users/profile
 // @access  Private
 const getProfile = async (req, res, next) => {
   try {
+    const user = await User.findById(req.user._id);
+    if (user && !user.chatwaveId) {
+      user.chatwaveId = await generateChatwaveId();
+      await user.save();
+    }
     res.status(200).json({
       success: true,
-      user: req.user,
+      user: user ? user.toJSON() : req.user,
     });
   } catch (error) {
     next(error);
@@ -54,71 +62,89 @@ const updateProfile = async (req, res, next) => {
   }
 };
 
-// @desc    Update account settings (change password, toggle online visibility)
-// @route   PUT /api/users/settings
+// @desc    Add contact by 10-digit ChatWave ID
+// @route   POST /api/users/contacts/add
 // @access  Private
-const updateSettings = async (req, res, next) => {
+const addContact = async (req, res, next) => {
   try {
-    const { currentPassword, newPassword, hideOnlineStatus } = req.body;
-    const user = await User.findById(req.user._id).select('+password');
+    const { chatwaveId, nickname } = req.body;
+    const userId = req.user._id;
 
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    if (!chatwaveId || !chatwaveId.trim()) {
+      return res.status(400).json({ success: false, message: 'ChatWave ID is required' });
     }
 
-    if (typeof hideOnlineStatus === 'boolean') {
-      user.hideOnlineStatus = hideOnlineStatus;
+    const cleanId = chatwaveId.trim().replace(/\s+/g, '');
+
+    const currentUser = await User.findById(userId);
+    if (currentUser.chatwaveId === cleanId) {
+      return res.status(400).json({ success: false, message: "You can't add yourself" });
     }
 
-    if (newPassword) {
-      if (user.authProvider === 'google' && !user.password) {
-        return res.status(400).json({
-          success: false,
-          message: 'Google accounts cannot set local passwords here.',
-        });
-      }
-
-      if (!currentPassword) {
-        return res.status(400).json({
-          success: false,
-          message: 'Current password is required to change password.',
-        });
-      }
-
-      const isMatch = await bcrypt.compare(currentPassword, user.password);
-      if (!isMatch) {
-        return res.status(400).json({
-          success: false,
-          message: 'Current password is incorrect.',
-        });
-      }
-
-      const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-      if (!passwordRegex.test(newPassword)) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'New password must be at least 8 characters with at least 1 uppercase letter, 1 number, and 1 special character.',
-        });
-      }
-
-      const salt = await bcrypt.genSalt(10);
-      user.password = await bcrypt.hash(newPassword, salt);
+    const targetUser = await User.findOne({ chatwaveId: cleanId });
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'No ChatWave user found with this ID' });
     }
 
-    await user.save();
+    const contact = await Contact.findOneAndUpdate(
+      { ownerId: userId, contactUserId: targetUser._id },
+      { nickname: nickname ? nickname.trim() : '' },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const formattedUser = targetUser.toJSON();
+    if (contact.nickname) {
+      formattedUser.nickname = contact.nickname;
+      formattedUser.displayName = contact.nickname;
+    } else {
+      formattedUser.displayName = targetUser.name;
+    }
+    formattedUser.isSavedContact = true;
 
     res.status(200).json({
       success: true,
-      message: 'Account settings updated successfully',
-      user: user.toJSON(),
+      message: 'Contact added successfully',
+      contact: {
+        user: formattedUser,
+        nickname: contact.nickname,
+        isSavedContact: true,
+      },
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Search registered users by name or email
+// @desc    Update nickname for a saved contact
+// @route   PUT /api/users/contacts/:targetUserId/nickname
+// @access  Private
+const updateContactNickname = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.params;
+    const { nickname } = req.body;
+    const userId = req.user._id;
+
+    const contact = await Contact.findOneAndUpdate(
+      { ownerId: userId, contactUserId: targetUserId },
+      { nickname: nickname ? nickname.trim() : '' },
+      { new: true }
+    );
+
+    if (!contact) {
+      return res.status(404).json({ success: false, message: 'Contact not found' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Contact nickname updated',
+      nickname: contact.nickname,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Search ONLY within current user's saved contacts
 // @route   GET /api/users/search?q=query
 // @access  Private
 const searchUsers = async (req, res, next) => {
@@ -128,20 +154,38 @@ const searchUsers = async (req, res, next) => {
       return res.status(200).json({ success: true, users: [] });
     }
 
-    const regex = new RegExp(query.trim(), 'i');
+    const userId = req.user._id;
+    const cleanIdRegex = new RegExp(query.trim().replace(/\s+/g, ''), 'i');
+    const normalRegex = new RegExp(query.trim(), 'i');
 
-    const users = await User.find({
-      _id: { $ne: req.user._id },
-      $or: [{ name: regex }, { email: regex }],
-    })
-      .select('name email avatarUrl bio isOnline lastSeen hideOnlineStatus')
-      .limit(20);
+    const savedContacts = await Contact.find({ ownerId: userId }).populate(
+      'contactUserId',
+      'name email avatarUrl bio isOnline lastSeen hideOnlineStatus chatwaveId'
+    );
 
-    const formattedUsers = users.map((u) => u.toJSON());
+    const matchedUsers = [];
+    for (const c of savedContacts) {
+      if (!c.contactUserId) continue;
+      const u = c.contactUserId;
+      const matchesName = normalRegex.test(u.name);
+      const matchesEmail = normalRegex.test(u.email);
+      const matchesId = u.chatwaveId && cleanIdRegex.test(u.chatwaveId);
+      const matchesNickname = c.nickname && normalRegex.test(c.nickname);
+
+      if (matchesName || matchesEmail || matchesId || matchesNickname) {
+        const userObj = u.toJSON();
+        if (c.nickname) {
+          userObj.nickname = c.nickname;
+          userObj.name = c.nickname; // Override name for consistent display
+        }
+        userObj.isSavedContact = true;
+        matchedUsers.push(userObj);
+      }
+    }
 
     res.status(200).json({
       success: true,
-      users: formattedUsers,
+      users: matchedUsers,
     });
   } catch (error) {
     next(error);
@@ -155,17 +199,50 @@ const getContacts = async (req, res, next) => {
   try {
     const userId = req.user._id;
 
+    // Fetch saved contacts map
+    const savedContacts = await Contact.find({ ownerId: userId });
+    const savedContactsMap = new Map();
+    savedContacts.forEach((c) => {
+      savedContactsMap.set(c.contactUserId.toString(), c.nickname || '');
+    });
+
     // 1. Get 1-on-1 Messages
     const messages = await Message.find({
       $or: [{ senderId: userId }, { receiverId: userId }],
       deletedFor: { $ne: userId },
     })
       .sort({ createdAt: -1 })
-      .populate('senderId', 'name email avatarUrl bio isOnline lastSeen hideOnlineStatus')
-      .populate('receiverId', 'name email avatarUrl bio isOnline lastSeen hideOnlineStatus');
+      .populate('senderId', 'name email avatarUrl bio isOnline lastSeen hideOnlineStatus chatwaveId')
+      .populate('receiverId', 'name email avatarUrl bio isOnline lastSeen hideOnlineStatus chatwaveId');
 
     const contactsMap = new Map();
 
+    // Populate saved contacts first (even if no messages sent yet)
+    const savedUsers = await User.find({ _id: { $in: Array.from(savedContactsMap.keys()) } }).select(
+      'name email avatarUrl bio isOnline lastSeen hideOnlineStatus chatwaveId'
+    );
+
+    for (const sUser of savedUsers) {
+      const sId = sUser._id.toString();
+      const nickname = savedContactsMap.get(sId);
+      const userObj = sUser.toJSON();
+      if (nickname) {
+        userObj.nickname = nickname;
+        userObj.name = nickname;
+      }
+      userObj.isSavedContact = true;
+
+      contactsMap.set(sId, {
+        user: userObj,
+        isGroup: false,
+        isSavedContact: true,
+        nickname,
+        lastMessage: null,
+        unreadCount: 0,
+      });
+    }
+
+    // Overlay 1-on-1 message history
     for (const msg of messages) {
       if (msg.isGroup) continue;
 
@@ -175,10 +252,23 @@ const getContacts = async (req, res, next) => {
       if (!contactUser || !contactUser._id) continue;
       const contactId = contactUser._id.toString();
 
-      if (!contactsMap.has(contactId)) {
+      const isSaved = savedContactsMap.has(contactId);
+      const nickname = isSaved ? savedContactsMap.get(contactId) : '';
+
+      const userObj = contactUser.toJSON ? contactUser.toJSON() : contactUser;
+      if (nickname) {
+        userObj.nickname = nickname;
+        userObj.name = nickname;
+      }
+      userObj.isSavedContact = isSaved;
+
+      const existingData = contactsMap.get(contactId);
+      if (!existingData || !existingData.lastMessage) {
         contactsMap.set(contactId, {
-          user: contactUser.toJSON ? contactUser.toJSON() : contactUser,
+          user: userObj,
           isGroup: false,
+          isSavedContact: isSaved,
+          nickname,
           lastMessage: {
             _id: msg._id,
             text: msg.deletedForEveryone ? 'This message was deleted' : msg.text,
@@ -191,6 +281,28 @@ const getContacts = async (req, res, next) => {
           },
           unreadCount: 0,
         });
+      }
+    }
+
+    // Filter out chats marked as deleted in ChatSettings (unless revived by a newer message)
+    const deletedSettings = await ChatSettings.find({ userId, deleted: true });
+    const deletedMap = new Map();
+    deletedSettings.forEach((ds) => {
+      deletedMap.set(ds.chatId.toString(), ds.deletedAt);
+    });
+
+    for (const [contactId, contactData] of Array.from(contactsMap.entries())) {
+      if (deletedMap.has(contactId)) {
+        const deletedAt = deletedMap.get(contactId);
+        const lastMsgTime = contactData.lastMessage ? new Date(contactData.lastMessage.createdAt) : null;
+
+        if (!lastMsgTime || (deletedAt && lastMsgTime <= new Date(deletedAt))) {
+          if (contactData.isSavedContact) {
+            contactData.lastMessage = null;
+          } else {
+            contactsMap.delete(contactId);
+          }
+        }
       }
     }
 
@@ -261,9 +373,15 @@ const blockUser = async (req, res, next) => {
     const { targetUserId } = req.params;
     const userId = req.user._id;
 
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid target user ID' });
+    }
+
+    const targetObjId = new mongoose.Types.ObjectId(targetUserId);
+
     const user = await User.findByIdAndUpdate(
       userId,
-      { $addToSet: { blockedUsers: targetUserId } },
+      { $addToSet: { blockedUsers: targetObjId } },
       { new: true }
     );
 
@@ -286,9 +404,15 @@ const unblockUser = async (req, res, next) => {
     const { targetUserId } = req.params;
     const userId = req.user._id;
 
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid target user ID' });
+    }
+
+    const targetObjId = new mongoose.Types.ObjectId(targetUserId);
+
     const user = await User.findByIdAndUpdate(
       userId,
-      { $pull: { blockedUsers: targetUserId } },
+      { $pull: { blockedUsers: targetObjId } },
       { new: true }
     );
 
@@ -311,14 +435,19 @@ const toggleBlockUser = async (req, res, next) => {
     const { targetUserId } = req.params;
     const userId = req.user._id;
 
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: 'Invalid target user ID' });
+    }
+
+    const targetObjId = new mongoose.Types.ObjectId(targetUserId);
     const currentUser = await User.findById(userId);
     const isCurrentlyBlocked = currentUser.blockedUsers.some(
       (id) => id.toString() === targetUserId.toString()
     );
 
     const updateQuery = isCurrentlyBlocked
-      ? { $pull: { blockedUsers: targetUserId } }
-      : { $addToSet: { blockedUsers: targetUserId } };
+      ? { $pull: { blockedUsers: targetObjId } }
+      : { $addToSet: { blockedUsers: targetObjId } };
 
     const user = await User.findByIdAndUpdate(userId, updateQuery, { new: true });
 
@@ -499,6 +628,8 @@ module.exports = {
   getProfile,
   updateProfile,
   updateSettings,
+  addContact,
+  updateContactNickname,
   searchUsers,
   getContacts,
   blockUser,

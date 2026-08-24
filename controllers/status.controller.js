@@ -1,6 +1,7 @@
 const Status = require('../models/Status');
 const User = require('../models/User');
 const Message = require('../models/Message');
+const Contact = require('../models/Contact');
 const { handleImageUpload } = require('../config/cloudinary');
 const { io } = require('../socket/socket');
 
@@ -59,8 +60,17 @@ const getStatusesFeed = async (req, res, next) => {
   try {
     const userId = req.user._id;
 
-    // Fetch active statuses (expiresAt > now)
+    // Fetch saved contacts for current user
+    const savedContacts = await Contact.find({ ownerId: userId });
+    const savedContactIds = savedContacts.map((c) => c.contactUserId);
+    const nicknameMap = new Map();
+    savedContacts.forEach((c) => {
+      if (c.nickname) nicknameMap.set(c.contactUserId.toString(), c.nickname);
+    });
+
+    // Fetch active statuses ONLY for current user + saved contacts
     const activeStatuses = await Status.find({
+      userId: { $in: [userId, ...savedContactIds] },
       expiresAt: { $gt: new Date() },
     })
       .sort({ createdAt: 1 })
@@ -74,9 +84,14 @@ const getStatusesFeed = async (req, res, next) => {
       if (!status.userId) return;
       const ownerId = status.userId._id.toString();
 
+      const userObj = status.userId.toJSON ? status.userId.toJSON() : status.userId;
+      if (nicknameMap.has(ownerId)) {
+        userObj.name = nicknameMap.get(ownerId);
+      }
+
       if (!userStatusMap.has(ownerId)) {
         userStatusMap.set(ownerId, {
-          user: status.userId,
+          user: userObj,
           statuses: [],
           allViewed: true,
           lastUpdated: status.createdAt,
@@ -110,7 +125,6 @@ const getStatusesFeed = async (req, res, next) => {
 
     const feed = Array.from(userStatusMap.values());
 
-    // Separate my status vs others
     const myStatus = feed.find((f) => f.user._id.toString() === userId.toString()) || null;
     const contactStatuses = feed.filter((f) => f.user._id.toString() !== userId.toString());
 

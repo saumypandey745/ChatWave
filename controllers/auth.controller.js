@@ -6,6 +6,7 @@ const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
 const { generateAccessToken, generateRefreshToken } = require('../utils/generateTokens');
 const { verifyGoogleIdToken } = require('../config/googleClient');
+const generateChatwaveId = require('../utils/generateChatwaveId');
 
 // @desc    Register a new user (Requires Email Verification)
 // @route   POST /api/auth/signup
@@ -50,11 +51,15 @@ const signup = async (req, res, next) => {
     const codeHash = await bcrypt.hash(code, 10);
     const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+    // Generate unique 10-digit ChatWave ID
+    const chatwaveId = await generateChatwaveId();
+
     // Create user with isEmailVerified: false
     const newUser = await User.create({
       name,
       email: email.toLowerCase(),
       password: hashedPassword,
+      chatwaveId,
       authProvider: 'local',
       isEmailVerified: false,
       emailVerificationCodeHash: codeHash,
@@ -284,13 +289,18 @@ const googleAuth = async (req, res, next) => {
       if (!user.avatarUrl && picture) {
         user.avatarUrl = picture;
       }
+      if (!user.chatwaveId) {
+        user.chatwaveId = await generateChatwaveId();
+      }
       user.isEmailVerified = true; // Auto-verify Google user
       user.isOnline = true;
       await user.save();
     } else {
+      const chatwaveId = await generateChatwaveId();
       user = await User.create({
         name: name || 'Google User',
         email: email.toLowerCase(),
+        chatwaveId,
         authProvider: 'google',
         avatarUrl: picture || '',
         isEmailVerified: true, // Google users bypass email verification

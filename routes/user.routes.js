@@ -5,6 +5,8 @@ const {
   getProfile,
   updateProfile,
   updateSettings,
+  addContact,
+  updateContactNickname,
   searchUsers,
   getContacts,
   blockUser,
@@ -27,6 +29,8 @@ router.put('/profile', upload.single('avatar'), updateProfile);
 router.put('/settings', updateSettings);
 router.get('/search', searchUsers);
 router.get('/contacts', getContacts);
+router.post('/contacts/add', addContact);
+router.put('/contacts/:targetUserId/nickname', updateContactNickname);
 
 router.post('/:targetUserId/block', blockUser);
 router.post('/:targetUserId/unblock', unblockUser);

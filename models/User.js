@@ -18,6 +18,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       select: false, // Don't return password by default
     },
+    chatwaveId: {
+      type: String,
+      unique: true,
+      index: true,
+      sparse: true,
+    },
     authProvider: {
       type: String,
       enum: ['local', 'google'],

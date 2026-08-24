@@ -408,6 +408,307 @@ const reportGroup = async (req, res, next) => {
   }
 };
 
+// @desc    Get or generate group invite link
+// @route   GET /api/groups/:groupId/invite-link
+// @access  Private (Admin only)
+const getInviteLink = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const crypto = require('crypto');
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    if (!group.inviteCode) {
+      group.inviteCode = crypto.randomBytes(8).toString('hex');
+      await group.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      inviteCode: group.inviteCode,
+      inviteRevoked: group.inviteRevoked,
+      requiresAdminApproval: group.requiresAdminApproval,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Reset group invite link (generate new code)
+// @route   POST /api/groups/:groupId/invite-link/reset
+// @access  Private (Admin only)
+const resetInviteLink = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const crypto = require('crypto');
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const member = group.members.find((m) => m.userId.toString() === req.user._id.toString());
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can reset invite link' });
+    }
+
+    group.inviteCode = crypto.randomBytes(8).toString('hex');
+    group.inviteRevoked = false;
+    await group.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Invite link reset successfully',
+      inviteCode: group.inviteCode,
+      inviteRevoked: false,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Revoke group invite link
+// @route   POST /api/groups/:groupId/invite-link/revoke
+// @access  Private (Admin only)
+const revokeInviteLink = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const member = group.members.find((m) => m.userId.toString() === req.user._id.toString());
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can revoke invite link' });
+    }
+
+    group.inviteRevoked = true;
+    await group.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Invite link revoked successfully',
+      inviteRevoked: true,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Join group via invite link
+// @route   POST /api/groups/join/:inviteCode
+// @access  Private
+const joinByInviteCode = async (req, res, next) => {
+  try {
+    const { inviteCode } = req.params;
+    const userId = req.user._id;
+
+    const group = await Group.findOne({ inviteCode });
+    if (!group) {
+      return res.status(404).json({ success: false, message: 'Invalid group invite link' });
+    }
+
+    if (group.inviteRevoked) {
+      return res.status(400).json({ success: false, message: 'This invite link has been revoked' });
+    }
+
+    const isMember = group.members.some((m) => m.userId.toString() === userId.toString());
+    if (isMember) {
+      return res.status(200).json({ success: true, message: 'Already a member', group });
+    }
+
+    if (group.requiresAdminApproval) {
+      const isPending = group.pendingMembers?.some((id) => id.toString() === userId.toString());
+      if (!isPending) {
+        group.pendingMembers.push(userId);
+        await group.save();
+      }
+      return res.status(200).json({
+        success: true,
+        pendingApproval: true,
+        message: 'Request sent! Waiting for admin approval.',
+      });
+    }
+
+    group.members.push({ userId, role: 'member', joinedAt: new Date() });
+    await group.save();
+
+    await createSystemMessage(group._id, `${req.user.name} joined via invite link`, userId);
+
+    const updatedGroup = await Group.findById(group._id).populate(
+      'members.userId',
+      'name email avatarUrl isOnline lastSeen'
+    );
+
+    if (io) {
+      io.to(`group:${group._id}`).emit('groupUpdated', updatedGroup);
+      io.to(`user:${userId}`).emit('groupCreated', updatedGroup);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Joined group successfully',
+      group: updatedGroup,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Toggle admin approval requirement for joining via link
+// @route   PUT /api/groups/:groupId/approval-setting
+// @access  Private (Admin only)
+const toggleAdminApproval = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { requiresAdminApproval } = req.body;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const member = group.members.find((m) => m.userId.toString() === req.user._id.toString());
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can update approval settings' });
+    }
+
+    group.requiresAdminApproval = requiresAdminApproval;
+    await group.save();
+
+    res.status(200).json({
+      success: true,
+      requiresAdminApproval: group.requiresAdminApproval,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get pending members for group
+// @route   GET /api/groups/:groupId/pending-members
+// @access  Private (Admin only)
+const getPendingMembers = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+
+    const group = await Group.findById(groupId).populate('pendingMembers', 'name email avatarUrl bio');
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const member = group.members.find((m) => m.userId.toString() === req.user._id.toString());
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can view pending members' });
+    }
+
+    res.status(200).json({
+      success: true,
+      pendingMembers: group.pendingMembers || [],
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Approve or reject a pending join request
+// @route   POST /api/groups/:groupId/pending-members/:targetUserId/action
+// @access  Private (Admin only)
+const handlePendingMemberAction = async (req, res, next) => {
+  try {
+    const { groupId, targetUserId } = req.params;
+    const { action } = req.body; // 'approve' or 'reject'
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const admin = group.members.find((m) => m.userId.toString() === req.user._id.toString());
+    if (!admin || admin.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can approve/reject join requests' });
+    }
+
+    group.pendingMembers = (group.pendingMembers || []).filter(
+      (id) => id.toString() !== targetUserId.toString()
+    );
+
+    if (action === 'approve') {
+      const isAlreadyMember = group.members.some((m) => m.userId.toString() === targetUserId.toString());
+      if (!isAlreadyMember) {
+        group.members.push({ userId: targetUserId, role: 'member', joinedAt: new Date() });
+      }
+    }
+
+    await group.save();
+
+    if (action === 'approve') {
+      const approvedUser = await User.findById(targetUserId).select('name');
+      await createSystemMessage(
+        group._id,
+        `${req.user.name} approved join request for ${approvedUser ? approvedUser.name : 'a user'}`,
+        req.user._id
+      );
+    }
+
+    const updatedGroup = await Group.findById(group._id).populate(
+      'members.userId',
+      'name email avatarUrl isOnline lastSeen'
+    );
+
+    if (io) {
+      io.to(`group:${groupId}`).emit('groupUpdated', updatedGroup);
+      if (action === 'approve') {
+        io.to(`user:${targetUserId}`).emit('groupCreated', updatedGroup);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Request ${action}d successfully`,
+      group: updatedGroup,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update group permissions (who can send messages, edit group info)
+// @route   PUT /api/groups/:groupId/permissions
+// @access  Private (Admin only)
+const updateGroupPermissions = async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const { sendMessages, editGroupInfo } = req.body;
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+    const member = group.members.find((m) => m.userId.toString() === req.user._id.toString());
+    if (!member || member.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can change group permissions' });
+    }
+
+    if (sendMessages) group.permissions.sendMessages = sendMessages;
+    if (editGroupInfo) group.permissions.editGroupInfo = editGroupInfo;
+
+    await group.save();
+
+    await createSystemMessage(group._id, `${req.user.name} updated group permissions`, req.user._id);
+
+    const updatedGroup = await Group.findById(group._id).populate(
+      'members.userId',
+      'name email avatarUrl isOnline lastSeen'
+    );
+
+    if (io) {
+      io.to(`group:${groupId}`).emit('groupUpdated', updatedGroup);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Permissions updated successfully',
+      permissions: updatedGroup.permissions,
+      group: updatedGroup,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createGroup,
   getGroupDetails,
@@ -418,4 +719,13 @@ module.exports = {
   leaveGroup,
   deleteGroup,
   reportGroup,
+  getInviteLink,
+  resetInviteLink,
+  revokeInviteLink,
+  joinByInviteCode,
+  toggleAdminApproval,
+  getPendingMembers,
+  handlePendingMemberAction,
+  updateGroupPermissions,
 };
+

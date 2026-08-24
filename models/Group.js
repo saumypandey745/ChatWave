@@ -44,6 +44,37 @@ const groupSchema = new mongoose.Schema(
       type: Number,
       default: 0, // 0 = off, 86400 = 24h, 604800 = 7d, 7776000 = 90d
     },
+    inviteCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    inviteRevoked: {
+      type: Boolean,
+      default: false,
+    },
+    requiresAdminApproval: {
+      type: Boolean,
+      default: false,
+    },
+    pendingMembers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    permissions: {
+      sendMessages: {
+        type: String,
+        enum: ['everyone', 'admins'],
+        default: 'everyone',
+      },
+      editGroupInfo: {
+        type: String,
+        enum: ['everyone', 'admins'],
+        default: 'everyone',
+      },
+    },
   },
   {
     timestamps: true,

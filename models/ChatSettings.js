@@ -42,6 +42,23 @@ const chatSettingsSchema = new mongoose.Schema(
       type: Number,
       default: 0, // 0 = off, 86400 = 24h, 604800 = 7d, 7776000 = 90d
     },
+    isLocked: {
+      type: Boolean,
+      default: false,
+    },
+    lockPin: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    deleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
