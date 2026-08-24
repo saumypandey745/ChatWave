@@ -22,11 +22,18 @@ const postStatus = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Media file is required for photo/video status' });
     }
 
+    let finalType = 'text';
+    if (mediaUrl) {
+      finalType = req.file?.mimetype?.startsWith('video/') ? 'video' : 'image';
+    } else if (type && ['text', 'image', 'video'].includes(type)) {
+      finalType = type;
+    }
+
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
 
     const status = await Status.create({
       userId,
-      type: type || (mediaUrl ? 'image' : 'text'),
+      type: finalType,
       content: content ? content.trim() : '',
       mediaUrl,
       backgroundColor: backgroundColor || '#6366f1',
