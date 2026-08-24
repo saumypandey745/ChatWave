@@ -60,12 +60,16 @@ const postStatus = async (req, res, next) => {
   }
 };
 
-// @desc    Get status feed (current user + contacts' active 24h statuses)
+// @desc    Get status feed (current user + permitted contacts' active 24h statuses)
 // @route   GET /api/statuses
 // @access  Private
 const getStatusesFeed = async (req, res, next) => {
   try {
     const userId = req.user._id;
+
+    // Fetch current user with populated mutedStatusUsers
+    const currentUser = await User.findById(userId);
+    const mutedUserIds = (currentUser.mutedStatusUsers || []).map((id) => id.toString());
 
     // Fetch saved contacts for current user
     const savedContacts = await Contact.find({ ownerId: userId });
@@ -75,9 +79,35 @@ const getStatusesFeed = async (req, res, next) => {
       if (c.nickname) nicknameMap.set(c.contactUserId.toString(), c.nickname);
     });
 
-    // Fetch active statuses ONLY for current user + saved contacts
+    // Determine which candidate contact owners allow the current user (viewer) to see their status
+    const permittedContactOwnerIds = [userId];
+
+    // Fetch User models for all saved contact owners to evaluate their statusPrivacy settings
+    const contactUsers = await User.find({ _id: { $in: savedContactIds } });
+
+    for (const owner of contactUsers) {
+      const privacyMode = owner.statusPrivacy?.mode || 'contacts';
+      const exceptions = (owner.statusPrivacy?.exceptions || []).map((id) => id.toString());
+
+      if (privacyMode === 'contacts') {
+        // Default: all saved contacts can view
+        permittedContactOwnerIds.push(owner._id);
+      } else if (privacyMode === 'contacts_except') {
+        // Exclude specific contacts in exceptions list
+        if (!exceptions.includes(userId.toString())) {
+          permittedContactOwnerIds.push(owner._id);
+        }
+      } else if (privacyMode === 'only_share_with') {
+        // Only allow contacts in exceptions list
+        if (exceptions.includes(userId.toString())) {
+          permittedContactOwnerIds.push(owner._id);
+        }
+      }
+    }
+
+    // Fetch active statuses ONLY for current user + permitted owners
     const activeStatuses = await Status.find({
-      userId: { $in: [userId, ...savedContactIds] },
+      userId: { $in: permittedContactOwnerIds },
       expiresAt: { $gt: new Date() },
     })
       .sort({ createdAt: 1 })
@@ -101,6 +131,7 @@ const getStatusesFeed = async (req, res, next) => {
           user: userObj,
           statuses: [],
           allViewed: true,
+          isMuted: mutedUserIds.includes(ownerId),
           lastUpdated: status.createdAt,
         });
       }
@@ -133,12 +164,111 @@ const getStatusesFeed = async (req, res, next) => {
     const feed = Array.from(userStatusMap.values());
 
     const myStatus = feed.find((f) => f.user._id.toString() === userId.toString()) || null;
-    const contactStatuses = feed.filter((f) => f.user._id.toString() !== userId.toString());
+    const allContactStatuses = feed.filter((f) => f.user._id.toString() !== userId.toString());
+
+    // Separate normal contact updates vs muted status updates
+    const contactStatuses = allContactStatuses.filter((f) => !f.isMuted);
+    const mutedStatuses = allContactStatuses.filter((f) => f.isMuted);
 
     res.status(200).json({
       success: true,
       myStatus,
       contactStatuses,
+      mutedStatuses,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get current user's status privacy settings & muted status users
+// @route   GET /api/statuses/privacy
+// @access  Private
+const getStatusPrivacy = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate('statusPrivacy.exceptions', 'name avatarUrl chatwaveId email')
+      .populate('mutedStatusUsers', 'name avatarUrl chatwaveId email');
+
+    res.status(200).json({
+      success: true,
+      statusPrivacy: user.statusPrivacy || { mode: 'contacts', exceptions: [] },
+      mutedStatusUsers: user.mutedStatusUsers || [],
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update status privacy settings ('contacts' | 'contacts_except' | 'only_share_with')
+// @route   POST /api/statuses/privacy
+// @access  Private
+const updateStatusPrivacy = async (req, res, next) => {
+  try {
+    const { mode, exceptions = [] } = req.body;
+    const userId = req.user._id;
+
+    if (!['contacts', 'contacts_except', 'only_share_with'].includes(mode)) {
+      return res.status(400).json({ success: false, message: 'Invalid status privacy mode' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        statusPrivacy: {
+          mode,
+          exceptions,
+        },
+      },
+      { new: true }
+    )
+      .populate('statusPrivacy.exceptions', 'name avatarUrl chatwaveId email')
+      .populate('mutedStatusUsers', 'name avatarUrl chatwaveId email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Status privacy updated successfully',
+      statusPrivacy: user.statusPrivacy,
+      mutedStatusUsers: user.mutedStatusUsers,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Mute or Unmute a contact's status updates
+// @route   POST /api/statuses/mute-user
+// @access  Private
+const toggleMuteStatusUser = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.body;
+    const userId = req.user._id;
+
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, message: 'Target user ID is required' });
+    }
+
+    const user = await User.findById(userId);
+    const isMuted = user.mutedStatusUsers.some((id) => id.toString() === targetUserId.toString());
+
+    if (isMuted) {
+      user.mutedStatusUsers = user.mutedStatusUsers.filter((id) => id.toString() !== targetUserId.toString());
+    } else {
+      user.mutedStatusUsers.push(targetUserId);
+    }
+
+    await user.save();
+
+    const updatedUser = await User.findById(userId).populate(
+      'mutedStatusUsers',
+      'name avatarUrl chatwaveId email'
+    );
+
+    res.status(200).json({
+      success: true,
+      message: isMuted ? 'Contact status unmuted' : 'Contact status muted',
+      isMuted: !isMuted,
+      mutedStatusUsers: updatedUser.mutedStatusUsers,
     });
   } catch (error) {
     next(error);
@@ -201,6 +331,9 @@ const deleteStatus = async (req, res, next) => {
 module.exports = {
   postStatus,
   getStatusesFeed,
+  getStatusPrivacy,
+  updateStatusPrivacy,
+  toggleMuteStatusUser,
   markStatusViewed,
   deleteStatus,
 };

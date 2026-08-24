@@ -56,6 +56,25 @@ const userSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    statusPrivacy: {
+      mode: {
+        type: String,
+        enum: ['contacts', 'contacts_except', 'only_share_with'],
+        default: 'contacts',
+      },
+      exceptions: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+      ],
+    },
+    mutedStatusUsers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     lastSeenVisibility: {
       type: String,
       enum: ['everyone', 'contacts', 'nobody'],
