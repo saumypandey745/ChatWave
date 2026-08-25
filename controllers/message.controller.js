@@ -115,6 +115,9 @@ const sendMessage = async (req, res, next) => {
       locationData,
       contactData,
       isViewOnce,
+      imageUrl: reqImageUrl,
+      isSticker,
+      isGif,
     } = req.body;
 
     const isGroupChat = isGroup === 'true' || isGroup === true;
@@ -156,7 +159,7 @@ const sendMessage = async (req, res, next) => {
       }
     }
 
-    let imageUrl = '';
+    let imageUrl = reqImageUrl || '';
     let fileData = null;
 
     if (req.file) {
@@ -259,9 +262,11 @@ const sendMessage = async (req, res, next) => {
       receiverId: isGroupChat ? null : chatId,
       chatId,
       isGroup: isGroupChat,
-      type: type || (fileData ? (type === 'audio' ? 'audio' : 'document') : imageUrl ? 'image' : 'text'),
+      type: type || (fileData ? (type === 'audio' ? 'audio' : 'document') : imageUrl ? (isSticker ? 'sticker' : isGif ? 'gif' : 'image') : 'text'),
       text: text ? text.trim() : '',
       imageUrl,
+      isSticker: isSticker === 'true' || isSticker === true || type === 'sticker',
+      isGif: isGif === 'true' || isGif === true || type === 'gif',
       fileData,
       locationData: parsedLocation,
       contactData: parsedContact,

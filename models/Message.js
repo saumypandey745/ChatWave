@@ -23,7 +23,7 @@ const messageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'call-log', 'system', 'poll'],
+      enum: ['text', 'image', 'video', 'audio', 'document', 'location', 'contact', 'call-log', 'system', 'poll', 'sticker', 'gif'],
       default: 'text',
     },
     text: {
@@ -33,6 +33,14 @@ const messageSchema = new mongoose.Schema(
     imageUrl: {
       type: String,
       default: '',
+    },
+    isSticker: {
+      type: Boolean,
+      default: false,
+    },
+    isGif: {
+      type: Boolean,
+      default: false,
     },
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
