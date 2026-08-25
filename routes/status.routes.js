@@ -8,6 +8,7 @@ const {
   updateStatusPrivacy,
   toggleMuteStatusUser,
   markStatusViewed,
+  reactToStatus,
   deleteStatus,
 } = require('../controllers/status.controller');
 
@@ -21,6 +22,7 @@ router.get('/privacy', getStatusPrivacy);
 router.post('/privacy', updateStatusPrivacy);
 router.post('/mute-user', toggleMuteStatusUser);
 router.post('/:statusId/view', markStatusViewed);
+router.post('/:statusId/react', reactToStatus);
 router.delete('/:statusId', deleteStatus);
 
 module.exports = router;

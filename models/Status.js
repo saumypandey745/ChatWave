@@ -40,6 +40,10 @@ const statusSchema = new mongoose.Schema(
           type: Date,
           default: Date.now,
         },
+        reaction: {
+          type: String,
+          default: '',
+        },
       },
     ],
     expiresAt: {

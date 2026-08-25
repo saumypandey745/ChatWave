@@ -334,6 +334,53 @@ const deleteStatus = async (req, res, next) => {
   }
 };
 
+// @desc    React to a status update (like / emoji reaction)
+// @route   POST /api/statuses/:statusId/react
+// @access  Private
+const reactToStatus = async (req, res, next) => {
+  try {
+    const { statusId } = req.params;
+    const { emoji } = req.body;
+    const userId = req.user._id;
+
+    if (!emoji) {
+      return res.status(400).json({ success: false, message: 'Emoji reaction is required' });
+    }
+
+    const status = await Status.findById(statusId);
+    if (!status) return res.status(404).json({ success: false, message: 'Status not found' });
+
+    let viewerEntry = status.viewedBy.find((v) => v.userId.toString() === userId.toString());
+    if (viewerEntry) {
+      viewerEntry.reaction = emoji;
+    } else {
+      status.viewedBy.push({
+        userId,
+        viewedAt: new Date(),
+        reaction: emoji,
+      });
+    }
+
+    await status.save();
+
+    if (io) {
+      io.to(`user:${status.userId}`).emit('statusReacted', {
+        statusId,
+        reaction: emoji,
+        viewer: { _id: userId, name: req.user.name, avatarUrl: req.user.avatarUrl },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Reaction saved',
+      reaction: emoji,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   postStatus,
   getStatusesFeed,
@@ -341,5 +388,6 @@ module.exports = {
   updateStatusPrivacy,
   toggleMuteStatusUser,
   markStatusViewed,
+  reactToStatus,
   deleteStatus,
 };
