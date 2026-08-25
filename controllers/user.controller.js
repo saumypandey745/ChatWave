@@ -373,13 +373,13 @@ const getContacts = async (req, res, next) => {
         isGroup: true,
         lastMessage: lastMsg
           ? {
-              _id: lastMsg._id,
-              text: lastMsg.deletedForEveryone ? 'This message was deleted' : lastMsg.text,
-              type: lastMsg.type,
-              imageUrl: lastMsg.imageUrl,
-              senderId: lastMsg.senderId,
-              createdAt: lastMsg.createdAt,
-            }
+            _id: lastMsg._id,
+            text: lastMsg.deletedForEveryone ? 'This message was deleted' : lastMsg.text,
+            type: lastMsg.type,
+            imageUrl: lastMsg.imageUrl,
+            senderId: lastMsg.senderId,
+            createdAt: lastMsg.createdAt,
+          }
           : null,
         unreadCount,
       });
