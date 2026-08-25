@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Status = require('../models/Status');
 const User = require('../models/User');
 const Message = require('../models/Message');
@@ -10,7 +11,7 @@ const { io } = require('../socket/socket');
 // @access  Private
 const postStatus = async (req, res, next) => {
   try {
-    const { type, content, backgroundColor, font } = req.body;
+    const { type, content, backgroundColor, font, statusPrivacy } = req.body;
     const userId = req.user._id;
 
     let mediaUrl = '';
@@ -29,6 +30,30 @@ const postStatus = async (req, res, next) => {
       finalType = type;
     }
 
+    // Determine statusPrivacy settings
+    let parsedPrivacy = null;
+    if (statusPrivacy) {
+      if (typeof statusPrivacy === 'string') {
+        try {
+          parsedPrivacy = JSON.parse(statusPrivacy);
+        } catch (e) {
+          // ignore
+        }
+      } else if (typeof statusPrivacy === 'object') {
+        parsedPrivacy = statusPrivacy;
+      }
+    }
+
+    const currentUser = await User.findById(userId);
+
+    let finalPrivacyMode = parsedPrivacy?.mode || currentUser.statusPrivacy?.mode || 'contacts';
+    let rawExceptions = parsedPrivacy?.exceptions !== undefined ? parsedPrivacy.exceptions : (currentUser.statusPrivacy?.exceptions || []);
+
+    let cleanExceptions = (Array.isArray(rawExceptions) ? rawExceptions : [])
+      .map((item) => (typeof item === 'object' && item !== null ? item._id || item.id || item : item))
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
 
     const status = await Status.create({
@@ -38,6 +63,10 @@ const postStatus = async (req, res, next) => {
       mediaUrl,
       backgroundColor: backgroundColor || '#6366f1',
       font: font || 'sans',
+      statusPrivacy: {
+        mode: finalPrivacyMode,
+        exceptions: cleanExceptions,
+      },
       expiresAt,
     });
 
@@ -73,46 +102,56 @@ const getStatusesFeed = async (req, res, next) => {
 
     // Fetch saved contacts for current user
     const savedContacts = await Contact.find({ ownerId: userId });
-    const savedContactIds = savedContacts.map((c) => c.contactUserId);
+    const savedContactIds = savedContacts.map((c) => c.contactUserId.toString());
     const nicknameMap = new Map();
     savedContacts.forEach((c) => {
       if (c.nickname) nicknameMap.set(c.contactUserId.toString(), c.nickname);
     });
 
-    // Determine which candidate contact owners allow the current user (viewer) to see their status
-    const permittedContactOwnerIds = [userId];
+    // Fetch all candidate owners (saved contacts + current user)
+    const candidateOwnerIds = [...savedContactIds, userId.toString()];
 
-    // Fetch User models for all saved contact owners to evaluate their statusPrivacy settings
-    const contactUsers = await User.find({ _id: { $in: savedContactIds } });
+    // Fetch User models for contact owners to check default privacy fallback
+    const contactUsers = await User.find({ _id: { $in: candidateOwnerIds } });
+    const userDefaultPrivacyMap = new Map();
+    contactUsers.forEach((u) => {
+      userDefaultPrivacyMap.set(u._id.toString(), u.statusPrivacy || { mode: 'contacts', exceptions: [] });
+    });
 
-    for (const owner of contactUsers) {
-      const privacyMode = owner.statusPrivacy?.mode || 'contacts';
-      const exceptions = (owner.statusPrivacy?.exceptions || []).map((id) => id.toString());
-
-      if (privacyMode === 'contacts') {
-        // Default: all saved contacts can view
-        permittedContactOwnerIds.push(owner._id);
-      } else if (privacyMode === 'contacts_except') {
-        // Exclude specific contacts in exceptions list
-        if (!exceptions.includes(userId.toString())) {
-          permittedContactOwnerIds.push(owner._id);
-        }
-      } else if (privacyMode === 'only_share_with') {
-        // Only allow contacts in exceptions list
-        if (exceptions.includes(userId.toString())) {
-          permittedContactOwnerIds.push(owner._id);
-        }
-      }
-    }
-
-    // Fetch active statuses ONLY for current user + permitted owners
-    const activeStatuses = await Status.find({
-      userId: { $in: permittedContactOwnerIds },
+    // Fetch active statuses for current user + all saved contacts
+    const candidateStatuses = await Status.find({
+      userId: { $in: candidateOwnerIds },
       expiresAt: { $gt: new Date() },
     })
       .sort({ createdAt: 1 })
       .populate('userId', 'name avatarUrl')
       .populate('viewedBy.userId', 'name avatarUrl');
+
+    // Filter statuses based on PER-STATUS privacy rules for viewer (userId)
+    const activeStatuses = candidateStatuses.filter((status) => {
+      if (!status.userId) return false;
+      const ownerId = status.userId._id ? status.userId._id.toString() : status.userId.toString();
+
+      // Owner can always see their own statuses
+      if (ownerId === userId.toString()) return true;
+
+      // Determine privacy settings for this specific status
+      const defaultPrivacy = userDefaultPrivacyMap.get(ownerId) || { mode: 'contacts', exceptions: [] };
+      const privacyMode = status.statusPrivacy?.mode || defaultPrivacy.mode || 'contacts';
+      const exceptions = (status.statusPrivacy?.exceptions?.length ? status.statusPrivacy.exceptions : defaultPrivacy.exceptions || []).map(
+        (id) => (id._id ? id._id.toString() : id.toString())
+      );
+
+      if (privacyMode === 'contacts') {
+        return true;
+      } else if (privacyMode === 'contacts_except') {
+        return !exceptions.includes(userId.toString());
+      } else if (privacyMode === 'only_share_with') {
+        return exceptions.includes(userId.toString());
+      }
+
+      return true;
+    });
 
     // Group statuses by user
     const userStatusMap = new Map();
